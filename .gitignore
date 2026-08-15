@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# data/snapshots is a symlink to ~/Library/Application Support/apex-fpl/snapshots
+# (kept outside ~/Documents due to macOS TCC restrictions on launchd — see
+# docs/fpl_gap_analysis.md and research/research_plan.md). The symlink itself
+# is fine to track; the actual snapshot payloads are not source and are large.
+data/snapshots/**
+data/logs/
+data/raw/
+data/canonical/
+data/external/
+artifacts/

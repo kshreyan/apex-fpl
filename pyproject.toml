@@ -1,0 +1,37 @@
+[project]
+name = "apex-fpl"
+version = "0.1.0"
+description = "APEX FPL — research-grade FPL forecasting and decision system"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32",
+    "pyyaml>=6.0",
+    # Added for Phase 2: numpy for vectorized Poisson/Elo math (ported from
+    # the World Cup repo's approach), scipy for its Poisson distribution and
+    # scipy.optimize.milp (HiGHS-backed MILP solver) used by the squad
+    # optimizer — avoids adding a heavier dependency like OR-Tools/PuLP when
+    # scipy already covers the smallest-legal-optimizer need.
+    "numpy>=1.26",
+    "scipy>=1.11",
+    # Added for Phase 5: IsotonicRegression and LogisticRegression for
+    # probability calibration (spec Part XX). The World Cup repo's own
+    # calibration_utils.py already used sklearn for exactly this — hand-
+    # rolling pool-adjacent-violators/Platt scaling would just reinvent a
+    # well-tested wheel for no real benefit at this point.
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+# Added only when a phase actually needs them (spec: don't introduce tech
+# merely because it's on an allowed list). pandas/DuckDB/Parquet will be
+# added if/when table volumes actually justify them.
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

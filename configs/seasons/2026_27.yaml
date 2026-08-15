@@ -1,0 +1,172 @@
+# APEX FPL — Season rule configuration
+# Every rule carries its own source and retrieval date, per spec Part III.
+# Primary source: live fantasy.premierleague.com/api/bootstrap-static/ response,
+# fetched and parsed directly in this session (2026-08-14) — element_types,
+# game_config.rules, game_config.scoring, chips, events. This is the
+# authoritative game-engine configuration, not a secondary interpretation.
+# Secondary sources (premierleague.com/en/news articles + independent blogs,
+# cross-corroborated) fill gaps the bootstrap-static payload doesn't expose
+# (BPS action-weight matrix, price-change/GW-lockdown timing narrative).
+# fantasy.premierleague.com/help/rules is JS-rendered and could not be
+# fetched directly; bootstrap-static supersedes it as ground truth anyway.
+
+season: "2026/27"
+config_version: 2
+retrieved_at: "2026-08-14"
+season_status: >
+  NOT YET STARTED as of retrieval. GW1 deadline confirmed live from the API:
+  2026-08-21T17:30:00Z (7 days after this config was written). is_current=false,
+  is_next=true for event id 1. This means zero prospective 2026/27 snapshots
+  exist yet — Phase 1 snapshot capture must begin before 2026-08-21T17:30:00Z
+  to have any pre-deadline GW1 data at all.
+
+squad:
+  budget: 100.0
+  currency: "GBPm"
+  budget_raw_units: 1000          # game_config.rules.squad_total_spend
+  currency_multiplier: 10         # game_config.rules.ui_currency_multiplier (budget = raw/multiplier)
+  squad_size: 15                  # game_config.rules.squad_squadsize
+  quotas: {GK: 2, DEF: 5, MID: 5, FWD: 3}   # element_types[*].squad_select
+  max_players_per_club: 3         # game_config.rules.squad_team_limit
+  starting_xi_size: 11            # game_config.rules.squad_squadplay
+  starting_xi_min: {GK: 1, DEF: 3, MID: 2, FWD: 1}   # element_types[*].squad_min_play
+  starting_xi_max: {GK: 1, DEF: 5, MID: 5, FWD: 3}   # element_types[*].squad_max_play
+  element_type_counts_live: {GK: 65, DEF: 193, MID: 259, FWD: 70}  # element_count, informational only (player pool size, not a rule)
+  source: "https://fantasy.premierleague.com/api/bootstrap-static/ (element_types, game_config.rules)"
+  verification_status: confirmed_from_api
+  notes: >
+    Formation legality is derived from starting_xi_min/max per position, not
+    a fixed enumerated list — any XI satisfying those bounds (and summing to
+    11) is legal. The optimizer must implement it this way, not via an enum.
+
+scoring:
+  # game_config.scoring, confirmed directly from the live API response.
+  appearance:
+    under_60_min: 1   # scoring.short_play
+    at_least_60_min: 2  # scoring.long_play
+  goals_scored: {GK: 10, DEF: 6, MID: 5, FWD: 4}      # scoring.goals_scored
+  assist: 3                                            # scoring.assists
+  clean_sheet: {GK: 4, DEF: 4, MID: 1, FWD: 0}         # scoring.clean_sheets
+  clean_sheet_min_minutes: 60
+  goals_conceded: {GK: -1, DEF: -1, MID: 0, FWD: 0}    # scoring.goals_conceded (per-unit value; divisor below)
+  goals_conceded_divisor: 2      # standard FPL rule (-1 per 2 conceded); NOT explicitly present in the API's scoring dict, which gives per-unit point value only — treat divisor as needs_confirmation until seen applied to a live finalized score
+  saves: 1                       # scoring.saves (per-unit point value)
+  saves_divisor: 3               # standard FPL rule (1pt per 3 saves); same caveat as goals_conceded_divisor
+  penalty_save: 5                # scoring.penalties_saved
+  penalty_miss: -2               # scoring.penalties_missed
+  yellow_card: -1                # scoring.yellow_cards
+  red_card: -3                   # scoring.red_cards
+  own_goal: -2                   # scoring.own_goals
+  bonus_per_bps_rank: {first: 3, second: 2, third: 1}  # scoring.bonus=1 is a multiplier; standard 3/2/1 award by BPS rank, ties can award equal points per official mechanism
+  defensive_contribution:
+    DEF: {threshold_actions: 10, actions: ["clearances", "blocks", "interceptions", "tackles"], points: 2}
+    MID: {threshold_actions: 12, actions: ["clearances", "blocks", "interceptions", "tackles", "recoveries"], points: 2}
+    FWD: {threshold_actions: 12, actions: ["clearances", "blocks", "interceptions", "tackles", "recoveries"], points: 2}
+    GK: null   # scoring.defensive_contribution.GKP == 0 — CONFIRMED excluded, resolves prior open gap
+    cap_per_match: 2
+    source_note: >
+      Confirmed via scoring.defensive_contribution = {DEF:2, MID:2, FWD:2, GKP:0}
+      directly from the API. Threshold action counts (10/12) and the specific
+      action set (CBIT vs CBIRT) are NOT present in bootstrap-static's scoring
+      dict — those come from element_stats field names
+      (clearances_blocks_interceptions, recoveries, tackles, defensive_contribution)
+      cross-corroborated with premierleague.com/news and draftfantasy.com.
+  verification_status: confirmed_from_api
+  source: "https://fantasy.premierleague.com/api/bootstrap-static/ (game_config.scoring)"
+
+bps_2026_27_changes:
+  # game_config.scoring shows tackles / clearances_blocks_interceptions /
+  # recoveries all = 0 as DIRECT scoring-table entries (they feed
+  # defensive_contribution and the separate BPS calc, not direct points).
+  # The full per-action BPS weight matrix is not exposed by bootstrap-static
+  # at all (BPS is computed server-side from underlying match-stats feeds
+  # not present in this endpoint) — this remains a genuine gap, not
+  # something the API resolved.
+  tackled_penalty_removed: true
+  cbi_weighting: "1 BPS per 3 qualifying actions (was 1 per 2)"
+  gk_saves: "2 BPS per save (any); +1 in-box; +1 big-chance save; penalty save 7 BPS per this article"
+  stated_intent: "reduce overlap between BPS and defensive-contribution points; improve bonus prospects for GKs, full-backs, attackers"
+  source: "https://www.premierleague.com/en/news/4679946/whats-new-in-202627-fantasy-changes-to-bonus-points-system"
+  verification_status: needs_further_confirmation
+  full_matrix_available: false
+  resolution_plan: >
+    Full BPS matrix is not obtainable from bootstrap-static. Must reconcile
+    empirically once GW1 finishes: pull element-summary / event/{id}/live
+    bps field, regress against clearances_blocks_interceptions/tackles/
+    recoveries/saves/goals/etc. to recover implied per-action weights, or
+    find the official published BPS reference table.
+
+transfers:
+  free_transfers_per_gw: 1
+  max_extra_free_transfers: 4          # game_config.rules.max_extra_free_transfers
+  max_banked_free_transfers: 5          # derived: 1 current + 4 bankable extra
+  hit_cost_per_extra_transfer: -4
+  max_transfers_per_gw: 20              # game_config.rules.transfers_cap
+  sell_on_fee: 0.5                      # game_config.rules.transfers_sell_on_fee
+  element_sell_at_purchase_price: false # game_config.rules.element_sell_at_purchase_price
+  source: "https://fantasy.premierleague.com/api/bootstrap-static/ (game_config.rules)"
+  verification_status: confirmed_from_api
+
+chips:
+  # Directly parsed from bootstrap-static's `chips` array (8 entries).
+  inventory:
+    - {name: wildcard, half: 1, start_event: 2,  stop_event: 19, chip_type: transfer}
+    - {name: freehit,  half: 1, start_event: 2,  stop_event: 19, chip_type: transfer}
+    - {name: bboost,   half: 1, start_event: 1,  stop_event: 19, chip_type: team}
+    - {name: 3xc,      half: 1, start_event: 1,  stop_event: 19, chip_type: team}
+    - {name: wildcard, half: 2, start_event: 20, stop_event: 38, chip_type: transfer}
+    - {name: freehit,  half: 2, start_event: 20, stop_event: 38, chip_type: transfer}
+    - {name: bboost,   half: 2, start_event: 20, stop_event: 38, chip_type: team}
+    - {name: 3xc,      half: 2, start_event: 20, stop_event: 38, chip_type: team}
+  total_chips: 8
+  max_chips_per_gw: 1
+  first_half_window: {start_event: 1, stop_event: 19}   # bboost/3xc usable from GW1; wildcard/freehit NOT usable until GW2
+  wildcard_freehit_gw1_restriction: "wildcard and free hit both start_event=2 — confirmed NOT usable in GW1 (bench boost and triple captain ARE usable in GW1)"
+  first_set_deadline_gw: 19
+  first_set_deadline_utc: "2027-01-02T13:30:00Z"   # from secondary source; cross-check against event 19 deadline_time once available
+  first_set_carryover_to_second_half: false
+  free_hit_gw19_gw20_restriction: "if played GW19, cannot be played again GW20 (secondary source; not independently visible in chips array structure, needs Phase 1 confirmation once event 19/20 data is live)"
+  source_structure: "https://fantasy.premierleague.com/api/bootstrap-static/ (chips array)"
+  source_narrative: "https://www.premierleague.com/en/news/4679879/whats-happening-with-fpl-chips-in-202627"
+  verification_status: confirmed_from_api_partial
+  notes: >
+    Corrects an earlier draft of this config: only Free Hit was previously
+    flagged as GW1-restricted. The API confirms Wildcard is ALSO
+    unavailable in GW1 (start_event=2 for both), while Bench Boost and
+    Triple Captain ARE legal in GW1 (start_event=1).
+
+price_changes:
+  timing: "midnight UK time"
+  sell_price_rule: "purchase price + floor(sell_on_fee * price rise); no protection against price falls"
+  sell_on_fee: 0.5
+  source: "https://fantasy.premierleague.com/api/bootstrap-static/ (transfers_sell_on_fee) + https://worldinsport.com/fantasy-premier-league-rules-scoring/ (narrative)"
+  verification_status: confirmed_from_api
+
+gameweek_timing:
+  score_finalization: "09:00 UK time, day after the last match of the gameweek (changed from 1hr after final whistle in prior seasons)"
+  bonus_points_live_projection: "provisional bonus added ~20 minutes into each match, adjusts live until finalization"
+  reason: "additional time for Opta post-match data review, feeding BPS and defensive contributions"
+  gw1_deadline_utc: "2026-08-21T17:30:00Z"   # confirmed live from events[0].deadline_time
+  source: "https://www.premierleague.com/en/news/4679873/all-you-need-to-know-about-changes-to-fpl-for-202627"
+  source_gw1_deadline: "https://fantasy.premierleague.com/api/bootstrap-static/ (events[0])"
+  verification_status: needs_further_confirmation
+  implementation_note: >
+    Operationally critical: any snapshot taken before 09:00 UK the day after
+    the final GW match is PROVISIONAL, not final. Bronze-layer snapshots
+    must record retrieved_at and an is_finalized flag (derived from
+    events[i].data_checked / finished) so Gold-layer features never treat
+    provisional BPS/DC/points as ground truth for training.
+
+unresolved_gaps:
+  items:
+    - "Full BPS point-per-action weight matrix (bootstrap-static does not expose it; must be reverse-engineered from event/{id}/live once GW1 finishes, or a primary published table found)"
+    - "Auto-substitution rule text (priority order, formation-legality checks) — not in bootstrap-static, needs fantasy.premierleague.com/help/rules or a rendered fetch"
+    - "Exact double/blank gameweek fixture calendar for 2026/27 — needs /api/fixtures/ ingestion in Phase 1"
+    - "goals_conceded_divisor=2 and saves_divisor=3 are standard historical FPL rules, not explicitly present as divisors in this season's scoring payload (only per-unit point values are) — treat as needs_confirmation until validated against a live finalized gameweek score"
+    - "Free Hit GW19/GW20 double-restriction — sourced only from a secondary blog, not independently visible in the chips array"
+  resolution_plan: >
+    Phase 1 ingestion of /api/fixtures/, /api/event/{id}/live/, and
+    /api/element-summary/{id}/ closes the fixture-calendar and BPS-matrix
+    gaps empirically. Auto-sub rules require either a rendered fetch of
+    fantasy.premierleague.com/help/rules or reconstruction by observing
+    actual auto-substitutions applied after a live gameweek.

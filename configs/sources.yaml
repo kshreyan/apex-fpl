@@ -1,0 +1,99 @@
+# Data-source registry (spec Part IV.6). Only sources actually wired up or
+# concretely evaluated are listed — no aspirational entries.
+
+sources:
+  - name: fpl_bootstrap_static
+    owner: "Premier League / Fantasy Premier League"
+    data_type: "players, clubs, positions, gameweeks, game rules/scoring config"
+    endpoint: "https://fantasy.premierleague.com/api/bootstrap-static/"
+    historical_coverage: "current season only; no historical point-in-time API — this is why we snapshot ourselves"
+    update_frequency: "live, changes intra-day (prices, ownership, news, injury flags)"
+    publication_latency: "near-real-time"
+    licence: "no explicit ToS-accepted license found; unauthenticated public read-only endpoint used by the official FPL web app itself"
+    terms: "not formally reviewed against a published API ToS document; treated as public read-only until stated otherwise"
+    cost: "free"
+    rate_limits: "none encountered in this session's testing; no documented limit found"
+    reliability: "confirmed live and reachable 2026-08-14; full payload ~1.4MB"
+    historical_snapshot_availability: "none from the provider — we are the only source of historical snapshots from this point forward"
+    required_credentials: "none"
+    production_dependency: "critical — sole source for player/club/gameweek canonical entities"
+    fallback: "none identified yet"
+    status: "wired up (src/apex_fpl/data/bronze.py), captured daily via launchd"
+
+  - name: fpl_fixtures
+    owner: "Premier League / Fantasy Premier League"
+    data_type: "fixture list, kickoff times, FDR difficulty ratings, scores once played"
+    endpoint: "https://fantasy.premierleague.com/api/fixtures/"
+    historical_coverage: "current season only"
+    update_frequency: "changes when fixtures are rescheduled (postponements, DGW/BGW announcements); otherwise static"
+    publication_latency: "near-real-time"
+    licence: "same as bootstrap_static"
+    terms: "same as bootstrap_static"
+    cost: "free"
+    rate_limits: "none encountered"
+    reliability: "confirmed live 2026-08-14; 380 fixtures returned (38 GW x 10 matches, correct for 20-team league)"
+    historical_snapshot_availability: "none from provider"
+    required_credentials: "none"
+    production_dependency: "critical — sole source for fixture calendar / DGW-BGW detection"
+    fallback: "none identified yet"
+    status: "wired up, captured daily via launchd"
+
+  - name: martj42_international_results
+    owner: "GitHub user martj42 (community-maintained)"
+    data_type: "international football results — NOT applicable to club-level FPL"
+    endpoint: "https://github.com/martj42/international_results"
+    historical_coverage: "1872-present, international matches only"
+    update_frequency: "n/a to this project"
+    licence: "CC (per World Cup repo's README)"
+    cost: "free"
+    production_dependency: "none — irrelevant to Premier League club football"
+    status: "used only by the (separate) World Cup predictor project; not applicable to APEX FPL"
+
+  - name: vaastav_fantasy_premier_league_archive
+    owner: "GitHub user vaastav (community-maintained)"
+    data_type: "historical FPL player/gameweek data for prior seasons"
+    endpoint: "https://github.com/vaastav/Fantasy-Premier-League"
+    historical_coverage: "2016-17 through 2025-26 seasons; 2026-27 scaffolding present but empty (no gws/ yet, correctly, since the season hasn't started)"
+    update_frequency: "weekly through end of 2024-25 season (verified via commit history); 3x/season bulk updates (season start, end of January window, season end) from 2025-26 onward"
+    licence: "MIT (code) + explicit disclaimer that underlying data belongs to fantasy.premierleague.com and understat.com — confirmed by reading LICENSE directly, safe for non-commercial research with attribution"
+    terms: "reviewed — see docs/vaastav_archive_audit.md"
+    cost: "free"
+    rate_limits: "GitHub API standard unauthenticated limits (60 req/hr) if using the API; raw file downloads via raw.githubusercontent.com are not similarly limited"
+    reliability: >
+      AUDITED 2026-08-14, full findings in docs/vaastav_archive_audit.md.
+      Per-gameweek match/price/ownership columns (value, selected,
+      goals_scored, minutes, bps, etc.) are sourced from FPL's own frozen
+      per-gameweek history ledger, not re-derived by the scraper — verified
+      by reading collector.py and empirically confirming price genuinely
+      differs between GW1 and GW38 of the same season (461/572 players).
+      Grade A confidence for seasons through 2024-25 (weekly capture,
+      commit-history verified); grade B (plausible, not independently
+      spot-checked) for 2025-26 onward due to the reduced bulk-update
+      cadence. CONFIRMED LEAKAGE RISK: the xP column (sourced from a live
+      ep_this scrape, not the history ledger) — maintainer-documented with
+      empirical correlation evidence, worse for seasons captured under the
+      reduced cadence. cleaned_players.csv / players_raw.csv are
+      season-aggregate/current-snapshot, not gameweek-dated — must not be
+      used as if they were.
+    historical_snapshot_availability: "yes, per season, subject to the grading above"
+    required_credentials: "none"
+    production_dependency: "primary source for Dataset A/B historical training material once Phase 4 model tournaments begin"
+    fallback: "none identified"
+    status: "audited; usable per the policy in docs/vaastav_archive_audit.md — not yet ingested into the Bronze/Silver pipeline"
+
+  - name: event_level_match_data  # Opta-grade: tackles, blocks, interceptions, recoveries, shot locations
+    owner: "unknown — requires evaluation"
+    data_type: "player action-level match events needed for defensive contributions, BPS reconstruction, xG/xA at player granularity"
+    historical_coverage: "unknown"
+    licence: "unknown — likely to require a paid/licensed feed (Opta/StatsBomb) for full fidelity; free proxies (understat, FBref) need ToS review before any scraping-adjacent use"
+    cost: "unknown, likely non-zero for licensed-grade data"
+    production_dependency: "blocks Parts XII (defensive contributions), XIII (goalkeepers), XIV (BPS simulation) entirely until resolved"
+    status: "NOT SOURCED — the single largest open data gap in the project, per docs/fpl_gap_analysis.md"
+
+  - name: betting_odds_feed
+    owner: "unknown — requires evaluation"
+    data_type: "Premier League match-result / goals odds for market-consensus modelling"
+    licence: "unknown"
+    cost: "unknown, likely a paid API (e.g. the-odds-api.com, mirroring the World Cup repo's approach) for a free tier"
+    production_dependency: "needed for Part XI-style market ensemble; the de-vig/consensus math is already ported and ready (src/apex_fpl/models/teams/ once built), only the feed is missing"
+    status: "NOT SOURCED"

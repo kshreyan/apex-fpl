@@ -1,0 +1,50 @@
+# Phase 12 Report — Production System
+
+**Run:** 2026-08-16. **Reproduce:** `PYTHONPATH=src python scripts/run_production_recommendation.py 1` (~15s). Output: `artifacts/production_recommendations/gw01_recommendation_*.json`.
+
+## The gap this closes
+
+Every research phase (2 through 11) validated its models against the historical Vaastav archive — a different schema, a different code path, and always a gameweek with plenty of same-season history behind it. None of that machinery had ever been run against the LIVE 2026/27 Bronze/Silver data the daily snapshot job (`~/Library/LaunchAgents/com.apexfpl.snapshot.plist`, running since 2026-08-14) has been capturing this whole time. `docs/fpl_gap_analysis.md` had CLI/serving/production wiring flagged PARTIAL since Phase 0 and never revisited. Phase 12 closes that gap — and in doing so surfaced a real, previously-unaddressed structural problem: **the entire validated pipeline cannot produce a real GW1 recommendation for a brand-new season**, because every model that needs "recent gameweek history" (team strength, minutes, attacking allocation) has, by definition, zero current-season history on day one.
+
+## What was built
+
+1. **`src/apex_fpl/serving/live_data.py`** — the live-data adapter every research script never needed. Two real integration facts found while building it, not assumed: the canonical Silver CSVs are APPEND-ONLY logs across daily snapshots (every loader here deduplicates to the latest `retrieved_at` per primary key, or callers would silently see stale/duplicate rows), and live `element_type_id` maps to bootstrap-static's own "GKP" string, which does NOT match the historical archive's "GK" convention every optimizer in this project is keyed on (`POSITION_BY_ELEMENT_TYPE` maps element_type_id directly to "GK", not trusting either archive's position string to already agree). 8 new tests.
+
+2. **`src/apex_fpl/models/minutes/cold_start.py`** — a genuinely validated fallback for the minutes model's cold-start problem. Checked by hand before building anything: does a player's season-opening PRICE predict their GW1 starter likelihood? Yes, consistently, across all 4 independent seasons used throughout this project (cheapest-20%-by-price players start 60+ minutes only 10-26% of the time at GW1; priciest-20% players 52-58% of the time, every season checked). Fit via isotonic regression on real GW1 data, validated with leave-one-season-out cross-validation across the same 4 seasons: **beats a flat baseline on held-out log loss in all 4 folds** (e.g. 0.598 vs 0.656 log loss on the 2022-23 fold) — a real, generalizing signal, not assumed to work. 4 new tests, including the real leave-one-season-out check itself as a test (not just a one-off script run).
+
+3. **`scripts/run_production_recommendation.py`** — the actual orchestration Part LIV asks for: loads live rosters and fixtures, fits the team model on live + historical fallback fixtures, runs the cold-start minutes model, runs the (validated-elsewhere, unmodified) Monte Carlo simulator and the CONFIRMED CHAMPION squad optimizer (`select_squad` — explicitly NOT any of the not-promoted challengers: CVaR, MAD, or Phase 11's decision-focused shrinkage, all rejected by their own evidence), and freezes a timestamped, content-hashed recommendation artifact — the same discipline `replay.run_gameweek` already uses, applied to a live target instead of a historical one.
+
+166/166 tests pass project-wide.
+
+## Two structural cold-start problems, handled with different honesty levels
+
+- **Team model**: SOLVED, with a stated limitation. `build_team_model_fixtures` combines any real, finished 2026/27 fixtures (none exist yet — that's the actual situation) with 2024-25's real historical fixtures. The existing 380-day half-life decay (already designed to span well over a year, per `attack_defense.py`'s own docstring) handles the blending correctly with zero model changes needed; a promoted or otherwise-unrated club falls back to the model's own built-in league-average rating (`.get(team, 0.0)`), not a crash. **The stated limitation**: 2025/26 is not yet in this project's historical archive, so 2024-25 — already ~15 months stale by August 2026 — is the freshest available prior, meaningfully worse than what this mechanism was designed around. Ingesting 2025/26 (or building a live-season archive from the Bronze snapshots once matches start) is the concrete fix, not attempted here.
+
+- **Minutes model**: SOLVED, and validated (see above) — a genuine, if simpler, alternative to the champion `exponential_decay` model, used specifically because that model structurally cannot apply at GW1.
+
+- **Attacking allocation**: NOT SOLVED, honestly. There's no validated cold-start equivalent to the champion `shrinkage_share` model. Doing this properly would need reliable player-ID reconciliation between the live API and the historical archive (their identifiers don't match directly — a real data-engineering problem, not attempted this phase, see Phase 10's report for the same issue arising with ownership data). The production script instead uses a simple, explicitly UNVALIDATED price-weighted split within each team's outfield positions, and every recommendation this script produces carries that caveat in its own `caveats` field — not silently presented as equally trustworthy as the minutes model's real validation.
+
+## Dry run against real live data
+
+Ran against the actual live Bronze/Silver snapshot for 2026/27 GW1 (season not yet started — genuinely un-scoreable, but a real integration test of the whole pipeline against data no research script had ever touched): 587 players loaded, 10 fixtures, 15,000 Monte Carlo scenarios, a legal 15-player squad (correct 2/5/5/3 quotas) with Haaland (£15.5m, Man City) as captain — a sensible pick by any reasonable read of the live roster, and the kind of result that's easy to sanity-check by eye even without a real outcome to score it against yet. Frozen to `artifacts/production_recommendations/gw01_recommendation_*.json` with a content hash, exactly matching this project's established freeze-before-reveal discipline (there's nothing to reveal yet, but the reproducibility/audit-trail point stands regardless).
+
+## Addendum 2026-08-16 — scheduling installed, pending one manual step
+
+Asked to actually schedule this, following up on the decision point above. Built `scripts/run_scheduled_recommendation_check.py` (rebuilds Silver from any new Bronze snapshots, finds the next unfinished gameweek's deadline, and generates a recommendation once within a 48-hour window — regenerating on later days too, deliberately, so the freshest data is used as the real deadline approaches, not a stale one from days earlier) plus a shell wrapper and `com.apexfpl.recommendation.plist`, scheduled daily at 8:30am (30 minutes after the existing Bronze snapshot job). 1 new test (167/167 project-wide).
+
+**Before installing anything, tested the TCC constraint directly with a disposable probe LaunchAgent rather than assuming from the existing snapshot job's comment.** Confirmed empirically: launchd cannot read `data/canonical/`, `data/external/`, or `data/logs/` under this repo ("Operation not permitted"), and — found only after actually trying to trigger the real job — cannot even EXECUTE a script living under `~/Documents` at all, the same restriction that forced the Bronze-capture job to live entirely outside it.
+
+Given this, the choice was: grant Full Disk Access (one manual step, then everything runs directly against the real repo with no duplication) vs. duplicate the entire pipeline outside `~/Documents` (no manual step, but a much larger and more fragile maintenance burden than the small HTTP-fetch script the Bronze job duplicates). Asked rather than assumed — Full Disk Access was chosen.
+
+**Resolved the same day.** Full Disk Access was granted to `/bin/bash`. Re-triggered (`launchctl start com.apexfpl.recommendation`) and confirmed the permission error is gone — Silver rebuilds and the deadline check both run cleanly through the real launchd path. Went further and confirmed the GENERATE branch specifically (not just the "not due yet, skip" branch real conditions currently hit, since GW1 is 140+ hours away) by temporarily forcing the deadline window open, re-triggering via the real launchd job again, and watching it produce a complete, correctly-frozen recommendation end-to-end through the actual scheduled mechanism — then restored the real 48-hour production threshold and confirmed once more that it correctly reports "not yet due" under real conditions. The automation is live: it will run daily at 8:30am and generate a fresh recommendation on its own once GW1's real deadline (2026-08-21T17:30:00Z) comes within 48 hours, with no further action needed.
+
+## Decision: capability built, dry-run validated, one production wiring gap explicitly open
+
+Like Phases 7/9/10, there's no prior production system to promote this against (`fpl_gap_analysis.md` had this at PARTIAL, mostly empty scaffolding). This phase's deliverable is the working, tested, dry-run-validated pipeline itself — with the attacking-allocation cold-start gap stated plainly rather than covered up with an unvalidated model presented as trustworthy.
+
+## Concrete next steps (left for direction)
+
+1. **Whether to schedule this via launchd** — an explicit decision point, not taken here.
+2. **Ingest 2025/26 into the historical archive** (or build a live-season archive from the Bronze snapshots as 2026/27 progresses) — directly closes the team model's stated staleness limitation.
+3. **Player-ID reconciliation between the live API and the historical archive** — the concrete prerequisite for a real, validated attacking-allocation (and minutes, once GW2+ arrives and the champion model could use prior-season carryover too) cold-start model, replacing the current unvalidated price-weighted fallback.
+4. **Re-run this script once GW1 actually happens**, to validate the FULL pipeline (not just the cold-start pieces) end-to-end against a real outcome for the first time.

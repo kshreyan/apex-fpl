@@ -27,6 +27,24 @@ def _install_fake_network(monkeypatch, bootstrap_static: dict, fixtures: list):
     monkeypatch.setattr(score.fpl_client.bronze.requests, "get", fake_get)
 
 
+def _fake_players() -> dict:
+    """A synthetic pool satisfying sq.SQUAD_QUOTAS (GK:2, DEF:5, MID:5,
+    FWD:3) across 5 different teams (MAX_PER_CLUB=3), so
+    compute_template_team can legally pick a full XI without touching
+    the real data/canonical/ CSVs -- those are gitignored (real,
+    dev-machine-local Part A data), so any test that reaches
+    score_gameweek's baseline-computation step and depends on the real
+    live_data.load_players() would pass locally but hard-fail on a
+    fresh CI checkout with FileNotFoundError. Found for real: this is
+    exactly what broke the first live workflow run."""
+    players = {}
+    for pos, count in [("GK", 3), ("DEF", 6), ("MID", 6), ("FWD", 4)]:
+        for i in range(count):
+            pid = f"{pos}{i}"
+            players[pid] = {"position": pos, "team": f"Team{i % 5}", "selected_by_percent": 50.0 - i}
+    return players
+
+
 def _install_tmp_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(score, "PREDICTIONS_DIR", tmp_path / "predictions")
     monkeypatch.setattr(score, "RESULTS_DIR", tmp_path / "results")
@@ -34,6 +52,7 @@ def _install_tmp_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(score, "STANDINGS_DIR", tmp_path / "raw" / "standings")
     monkeypatch.setattr(score.fpl_client, "RAW_DATA_ROOT", tmp_path / "raw")
     monkeypatch.setattr(score.silver, "run_build", lambda bronze_root=None: {})
+    monkeypatch.setattr("apex_fpl.serving.live_data.load_players", lambda: _fake_players())
 
 
 def _write_prediction_line(path, record):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from apex_fpl.models.minutes import cold_start as cs
 
 
@@ -46,6 +48,9 @@ def test_real_historical_gw1_data_leave_one_season_out_beats_a_flat_baseline():
     from apex_fpl.backtesting import vaastav_loader as vl
 
     seasons = ["2020-21", "2022-23", "2023-24", "2024-25"]
+    missing = [s for s in seasons if not (vl._season_dir(s) / "merged_gw.csv").exists()]
+    if missing:
+        pytest.skip(f"{missing} data not present; fetch it before running this test")
     gw1_by_season = {}
     for season in seasons:
         rows = vl.load_merged_gw(season)

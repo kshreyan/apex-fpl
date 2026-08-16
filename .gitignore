@@ -21,20 +21,33 @@ artifacts/
 # this blanket rule since before Phase 13 existed; ~360KB/file, small
 # enough that committing it forever is not a real storage concern.
 
-# Two specific files carved out of the data/external/ blanket ignore:
-# apex_fpl.serving.live_data.build_team_model_fixtures() reads these at
-# LIVE PREDICTION TIME (not just in tests/backtesting) as a fallback
-# team-strength prior when a season has no completed 2026/27 fixtures
-# yet -- found for real when the first live workflow run crashed on a
-# FileNotFoundError CI had no way to avoid, since these were previously
-# assumed to be dev-machine-local, test-only fixtures. Small (~753KB
-# together) and intentionally narrow: only fixtures.csv + teams.csv for
-# the one season TEAM_MODEL_FALLBACK_SEASONS actually uses, not
-# merged_gw.csv (5MB, backtesting-only) or any other season.
+# Files carved out of the data/external/ blanket ignore because the
+# LIVE prediction path (not just tests/backtesting) reads them --
+# CANONICAL_ROOT for why. Both gaps found the same way: the first two
+# live workflow runs crashed on FileNotFoundError, since these were
+# previously assumed to be dev-machine-local, test-only fixtures.
+#   - fixtures.csv + teams.csv, 2024-25 only: apex_fpl.serving.
+#     live_data.build_team_model_fixtures()'s fallback team-strength
+#     prior (TEAM_MODEL_FALLBACK_SEASONS).
+#   - merged_gw.csv, the 4 seasons scripts/run_production_
+#     recommendation.py's COLD_START_MINUTES_TRAIN_SEASONS names: the
+#     cold-start minutes model's real historical GW1 training rows.
+# If either constant changes, this carve-out needs to change with it --
+# see CLAUDE.md.
 data/external/*
 !data/external/vaastav/
 data/external/vaastav/*
+!data/external/vaastav/2020-21/
+!data/external/vaastav/2022-23/
+!data/external/vaastav/2023-24/
 !data/external/vaastav/2024-25/
+data/external/vaastav/2020-21/*
+data/external/vaastav/2022-23/*
+data/external/vaastav/2023-24/*
 data/external/vaastav/2024-25/*
+!data/external/vaastav/2020-21/merged_gw.csv
+!data/external/vaastav/2022-23/merged_gw.csv
+!data/external/vaastav/2023-24/merged_gw.csv
+!data/external/vaastav/2024-25/merged_gw.csv
 !data/external/vaastav/2024-25/fixtures.csv
 !data/external/vaastav/2024-25/teams.csv

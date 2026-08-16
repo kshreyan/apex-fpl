@@ -366,6 +366,7 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
         is_missing = gw in (cov["gameweeks_missing_prediction"] or [])
         status, kind = _gw_status(gw, pred, res, is_missing)
         history_rows.append(f'<tr><td><a href="/gameweek/gw{gw:02d}/">GW{gw}</a></td><td>{_status_badge(status.replace("_", " ").title(), kind)}</td></tr>')
+    history_rows_html = "".join(history_rows) or '<tr><td colspan="2">No gameweeks yet.</td></tr>'
 
     body = raw(
         "<h1>The record, not just the picks</h1>"
@@ -385,7 +386,7 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
         f"{_biggest_misses_section(calibration['biggest_misses'])}"
         '<section aria-labelledby="history-heading">'
         '<h2 id="history-heading">Gameweek history</h2>'
-        f'<table class="data-table"><thead><tr><th scope="col">Gameweek</th><th scope="col">Status</th></tr></thead><tbody>{"".join(history_rows) or "<tr><td colspan=\"2\">No gameweeks yet.</td></tr>"}</tbody></table>'
+        f'<table class="data-table"><thead><tr><th scope="col">Gameweek</th><th scope="col">Status</th></tr></thead><tbody>{history_rows_html}</tbody></table>'
         "</section>"
     )
     return _page(

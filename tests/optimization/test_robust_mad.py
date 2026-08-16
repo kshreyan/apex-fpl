@@ -112,13 +112,41 @@ def test_mean_variance_optimizer_avoids_a_constructed_disaster_prone_star():
     assert rb.compute_mad(consistent_pts) < rb.compute_mad(boom_bust_pts)
 
 
-def test_time_limit_returns_a_legal_squad_even_if_not_proven_optimal():
-    # MAD's formulation has 2 deviation constraints per scenario (vs CVaR's 1), so it
-    # needs a slightly longer time budget than the CVaR test's 2.0s to reach even a
-    # first feasible solution on this pool size — 5.0s reliably lands on status=1
-    # (time-limited, feasible, not proven optimal), the exact case this test targets.
+def test_time_limit_returns_a_legal_squad_even_if_not_proven_optimal(monkeypatch):
+    # Originally forced this case with a tight wall-clock time_limit (5.0s). Found
+    # genuinely unreliable (Phase 13, first live workflow run's full-suite CI gate):
+    # under CPU contention from a ~275-test run, HiGHS sometimes couldn't reach EVEN a
+    # first feasible solution in 5.0s (RuntimeError, not the intended status=1 case).
+    # Tried node_limit next (caps branch-and-bound nodes, not seconds -- should be
+    # machine-independent): empirically, this particular MILP has no reliable middle
+    # ground either -- too few nodes and HiGHS returns a status scipy doesn't map to
+    # 0/1 at all ("solution limit reached"), a handful more and it proves optimal
+    # almost immediately. There is no resource limit, on any machine, that reliably
+    # catches this specific problem mid-solve.
+    #
+    # So this tests the status-handling code directly instead of gambling on solver
+    # behavior: run the real solver once (fast, no limits) to get a genuine, legal
+    # optimal solution, then monkeypatch `milp` to return that SAME x with status
+    # forced to 1 -- exercising exactly the "not proven optimal" branch in
+    # select_squad_mean_variance deterministically, on any machine, forever.
     pool = _make_scenario_pool(seed=3, n_scenarios=800)
-    squad, diagnostics = rb.select_squad_mean_variance(pool, lambda_risk=0.5, budget=sq.BUDGET, time_limit=5.0, return_diagnostics=True)
+    real_squad, real_diag = rb.select_squad_mean_variance(pool, lambda_risk=0.5, budget=sq.BUDGET, return_diagnostics=True)
+    assert real_diag["proven_optimal"] is True  # sanity: this problem really does solve to full optimality fast
+
+    real_milp = rb.milp
+    captured = {}
+
+    def fake_milp(*args, **kwargs):
+        result = real_milp(*args, **kwargs)
+        result.status = 1  # force "time/resource-limited, feasible, not proven optimal"
+        result.message = "fake: forced status=1 for a deterministic test"
+        captured["called"] = True
+        return result
+
+    monkeypatch.setattr(rb, "milp", fake_milp)
+    squad, diagnostics = rb.select_squad_mean_variance(pool, lambda_risk=0.5, budget=sq.BUDGET, return_diagnostics=True)
+    assert captured["called"] is True
+    assert {p.player_id for p in squad} == {p.player_id for p in real_squad}  # same underlying solution
 
     assert len(squad) == 15
     assert sum(p.price for p in squad) <= sq.BUDGET + 1e-6

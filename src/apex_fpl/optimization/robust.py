@@ -186,6 +186,7 @@ def select_squad_mean_variance(
     budget: float = BUDGET,
     time_limit: float | None = None,
     mip_rel_gap: float | None = None,
+    node_limit: int | None = None,
     return_diagnostics: bool = False,
 ) -> list[ScenarioPlayerCandidate] | tuple[list[ScenarioPlayerCandidate], dict]:
     """Selects a legal 15-player squad maximizing mean squad points minus
@@ -262,6 +263,8 @@ def select_squad_mean_variance(
         options["time_limit"] = time_limit
     if mip_rel_gap is not None:
         options["mip_rel_gap"] = mip_rel_gap
+    if node_limit is not None:
+        options["node_limit"] = node_limit
 
     res = milp(c=c, constraints=constraints, integrality=integrality, bounds=bounds, options=options or None)
     if res.status not in (0, 1) or res.x is None:

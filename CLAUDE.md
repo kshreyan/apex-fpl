@@ -54,6 +54,23 @@ kind a file is tells you whether it's safe to touch:
   a successful fetch. Absent on failure (nothing partial is ever
   written). No supersede semantics — a bad capture is just missing, not
   corrected in place.
+- **A fourth, narrower kind: committed model inputs.**
+  `data/external/vaastav/2024-25/{fixtures.csv,teams.csv}` — carved out
+  of the otherwise-gitignored `data/external/` (Part A's historical
+  archive, real dev-machine-local data, everywhere else genuinely
+  test-only). Found the hard way, from the first live workflow run:
+  `apex_fpl.serving.live_data.build_team_model_fixtures()` reads these
+  at actual prediction time, not just in backtests — it's the fallback
+  team-strength prior used until a new season has enough of its own
+  completed fixtures. CI has no access to anything not committed, so
+  this stopped being a test fixture and became a real runtime
+  dependency the moment the pipeline had to run somewhere other than a
+  dev machine. Kept deliberately narrow (~753KB: just those two files,
+  for just the one season `TEAM_MODEL_FALLBACK_SEASONS` actually names)
+  — not `merged_gw.csv` (5MB, backtesting-only), not any other season.
+  If `TEAM_MODEL_FALLBACK_SEASONS` in `scripts/run_production_
+  recommendation.py` ever changes, this `.gitignore` carve-out needs to
+  change with it, or the same crash recurs.
 
 ## `/current/` must never show picks without the season record attached
 

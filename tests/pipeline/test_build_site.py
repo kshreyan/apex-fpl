@@ -98,6 +98,37 @@ def test_run_builds_index_current_methodology_and_gameweek_pages(repo):
     assert (docs / "assets" / "staleness.js").exists()
 
 
+def test_every_internal_link_and_asset_carries_the_site_base_path(repo):
+    """Regression test for a real, live bug: GitHub Pages serves a
+    project site at https://<user>.github.io/<repo>/, not the domain
+    root. A bare '/current/' resolves against the root and 404s -- this
+    is exactly what shipped and broke every link on the live site except
+    the in-page skip-link (which never leaves the page). Every href/src
+    this module emits must carry build_site.SITE_BASE_PATH."""
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction")
+
+    build_site.run()
+
+    import re
+
+    docs = repo / "docs"
+    base = build_site.SITE_BASE_PATH
+    checked_any = False
+    for html_path in docs.rglob("*.html"):
+        html = html_path.read_text()
+        for m in re.finditer(r'(?:href|src)="([^"]+)"', html):
+            target = m.group(1)
+            if target.startswith("#") or target.startswith("http://") or target.startswith("https://"):
+                continue  # in-page anchors and external links (e.g. the commit-proof link) are exempt
+            checked_any = True
+            assert target.startswith(base + "/"), f"{html_path.relative_to(docs)}: {target!r} does not start with {base!r}"
+    assert checked_any  # sanity: this test isn't silently checking zero links
+
+
 def test_does_not_touch_preexisting_unrelated_docs_files(repo):
     (repo / "docs").mkdir()
     (repo / "docs" / "phase6_joint_simulation_report.md").write_text("# untouched research report")

@@ -64,6 +64,15 @@ DOCS_ROOT = REPO_ROOT / "docs"
 STALENESS_WARN_HOURS = 36
 STALENESS_ESCALATE_HOURS = 72
 
+# GitHub Pages serves a project site (not a custom domain or a
+# username.github.io user site) at https://<user>.github.io/<repo>/ --
+# every internal link and asset reference MUST carry this prefix, or it
+# resolves against the domain root instead and 404s. Found for real: the
+# live site's every link 404'd except the in-page "skip to content"
+# anchor, which doesn't leave the page. If this ever moves to a custom
+# domain (a bare CNAME, served at the root), set this to "".
+SITE_BASE_PATH = "/apex-fpl"
+
 SITE_TITLE = "APEX FPL"
 DISCLAIMER = (
     "APEX FPL is an independent research project. It is not affiliated with, "
@@ -99,6 +108,13 @@ def _all_results() -> dict[int, list[dict]]:
     return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(RESULTS_DIR.glob("gw*.jsonl"))}
 
 
+def _url(path: str) -> str:
+    """Every internal href/src must go through this -- see
+    SITE_BASE_PATH's own comment for why a bare '/foo/' 404s on a GitHub
+    Pages project site."""
+    return f"{SITE_BASE_PATH}{path}"
+
+
 def _commit_link_for_latest(ledger_dir: Path, gw: int, lines: list[dict]) -> str | None:
     if not lines:
         return None
@@ -114,7 +130,7 @@ def _nav(active_path: str) -> Raw:
     items = []
     for href, label in NAV_ITEMS:
         current = ' aria-current="page"' if href == active_path else ""
-        link = str(esc(label)).join([f'<a href="{href}"{current}>', "</a>"])
+        link = str(esc(label)).join([f'<a href="{_url(href)}"{current}>', "</a>"])
         items.append(f"<li>{link}</li>")
     return raw(f'<nav aria-label="Primary"><ul class="nav-list">{"".join(items)}</ul></nav>')
 
@@ -128,12 +144,12 @@ def _page(title: str, description: str, active_path: str, body: Raw, rebuilt_at_
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{esc(title)} — {esc(SITE_TITLE)}</title>\n"
         f'<meta name="description" content="{esc(description)}">\n'
-        '<link rel="stylesheet" href="/assets/site.css">\n'
+        f'<link rel="stylesheet" href="{_url("/assets/site.css")}">\n'
         "</head>\n"
         f'<body data-rebuilt-at="{esc(rebuilt_at_utc)}">\n'
         '<a class="skip-link" href="#main">Skip to main content</a>\n'
         "<header>\n"
-        f'<div class="header-inner"><a class="site-title" href="/">{esc(SITE_TITLE)}</a>'
+        f'<div class="header-inner"><a class="site-title" href="{_url("/")}">{esc(SITE_TITLE)}</a>'
         f"{_nav(active_path)}</div>\n"
         "</header>\n"
         f'<div id="staleness-banner" class="staleness-banner" hidden></div>\n'
@@ -142,7 +158,7 @@ def _page(title: str, description: str, active_path: str, body: Raw, rebuilt_at_
         f'<p class="disclaimer">{esc(DISCLAIMER)}</p>\n'
         f'<p class="build-note">Site last rebuilt {esc(rebuilt_at_utc)} UTC · &copy; {year} APEX FPL</p>\n'
         "</footer>\n"
-        '<script src="/assets/staleness.js" defer></script>\n'
+        f'<script src="{_url("/assets/staleness.js")}" defer></script>\n'
         "</body>\n</html>\n"
     )
 
@@ -268,7 +284,7 @@ def _calibration_bins_table(bins: list[dict]) -> Raw:
 def _missing_predictions_notice(missing_gws: list[int]) -> Raw:
     if not missing_gws:
         return raw("")
-    links = ", ".join(f'<a href="/gameweek/gw{gw:02d}/">GW{gw}</a>' for gw in missing_gws)
+    links = ", ".join(f'<a href="{_url(f"/gameweek/gw{gw:02d}/")}">GW{gw}</a>' for gw in missing_gws)
     return raw(
         '<div class="notice notice-critical" role="note">'
         f'{_status_badge("Pipeline gap", "critical")} '
@@ -346,7 +362,7 @@ def _record_summary_fragment(calibration: dict) -> Raw:
         f'<div class="stat-tile"><span class="stat-value">{esc(diff_str)}</span><span class="stat-label">Points vs. average manager</span></div>'
         f'<div class="stat-tile"><span class="stat-value">{esc(hit_rate_str)}</span><span class="stat-label">Captain hit rate</span></div>'
         "</div>"
-        '<p><a href="/">See the full calibration curve and history →</a></p>'
+        f'<p><a href="{_url("/")}">See the full calibration curve and history →</a></p>'
         "</section>"
     )
 
@@ -365,14 +381,17 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
         res = results.get(gw, [None])[-1] if results.get(gw) else None
         is_missing = gw in (cov["gameweeks_missing_prediction"] or [])
         status, kind = _gw_status(gw, pred, res, is_missing)
-        history_rows.append(f'<tr><td><a href="/gameweek/gw{gw:02d}/">GW{gw}</a></td><td>{_status_badge(status.replace("_", " ").title(), kind)}</td></tr>')
+        history_rows.append(f'<tr><td><a href="{_url(f"/gameweek/gw{gw:02d}/")}">GW{gw}</a></td><td>{_status_badge(status.replace("_", " ").title(), kind)}</td></tr>')
     history_rows_html = "".join(history_rows) or '<tr><td colspan="2">No gameweeks yet.</td></tr>'
 
     body = raw(
+        '<div class="hero">'
+        '<p class="eyebrow">Live, verifiable, in public</p>'
         "<h1>The record, not just the picks</h1>"
         "<p class=\"lede\">Every prediction this model has made is committed to git before its "
         "gameweek deadline, and every outcome is scored automatically once the gameweek settles — "
         "hits and misses alike, shown here plainly.</p>"
+        "</div>"
         f"{_missing_predictions_notice(cov['gameweeks_missing_prediction'] or [])}"
         f"{_record_summary_fragment(calibration)}"
         '<section aria-labelledby="calib-heading">'
@@ -522,63 +541,135 @@ def build_methodology_page(rebuilt_at_utc: str) -> str:
 
 SITE_CSS = """
 :root {
-  --surface: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-  --gridline: #e1e0d9; --border: rgba(11,11,11,0.10);
-  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
-  --link: #2a78d6;
-  --max-width: 880px;
+  --page: #f5f6f8; --surface: #ffffff; --surface-2: #fbfbfd;
+  --ink: #0b0e14; --ink-2: #454b57; --muted: #767c89;
+  --gridline: #e6e8ec; --border: rgba(11,14,20,0.08); --border-strong: rgba(11,14,20,0.14);
+  --good: #0ca30c; --good-soft: #e6f6e6;
+  --warning: #b3760a; --warning-soft: #fdf1d8;
+  --critical: #c22a2a; --critical-soft: #fce9e9;
+  --muted-soft: #eef0f3;
+  --brand: #2a78d6; --brand-ink: #ffffff; --brand-dark: #184f95;
+  --shadow-sm: 0 1px 2px rgba(11,14,20,0.06);
+  --shadow-md: 0 4px 14px rgba(11,14,20,0.07), 0 1px 3px rgba(11,14,20,0.06);
+  --shadow-lg: 0 12px 32px rgba(11,14,20,0.10), 0 2px 6px rgba(11,14,20,0.06);
+  --radius-sm: 8px; --radius-md: 14px; --radius-lg: 20px;
+  --max-width: 1080px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface: #1a1a19; --page: #0d0d0d; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-    --gridline: #2c2c2a; --border: rgba(255,255,255,0.10); --link: #3987e5;
+    --page: #0a0c10; --surface: #14171d; --surface-2: #191c23;
+    --ink: #f4f5f7; --ink-2: #c3c7d1; --muted: #8b909c;
+    --gridline: #262a33; --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.14);
+    --good: #34c759; --good-soft: rgba(52,199,89,0.14);
+    --warning: #f0a83a; --warning-soft: rgba(240,168,58,0.14);
+    --critical: #f0554f; --critical-soft: rgba(240,85,79,0.14);
+    --muted-soft: rgba(255,255,255,0.05);
+    --brand: #4c93e8; --brand-ink: #051225; --brand-dark: #9cc4f2;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 14px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 16px 40px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.3);
   }
 }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--page); color: var(--ink);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.5;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.55; -webkit-font-smoothing: antialiased;
 }
-.skip-link { position: absolute; left: -999px; top: 0; background: var(--surface); color: var(--ink); padding: 8px 12px; z-index: 10; }
-.skip-link:focus { left: 8px; top: 8px; }
-header { background: var(--surface); border-bottom: 1px solid var(--border); }
-.header-inner { max-width: var(--max-width); margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-.site-title { font-weight: 700; text-decoration: none; color: var(--ink); font-size: 1.1rem; }
-.nav-list { list-style: none; display: flex; gap: 16px; margin: 0; padding: 0; }
-.nav-list a { color: var(--ink-2); text-decoration: none; padding: 4px 2px; }
-.nav-list a:hover, .nav-list a:focus { color: var(--link); }
-.nav-list a[aria-current="page"] { color: var(--ink); font-weight: 600; border-bottom: 2px solid var(--link); }
-main { max-width: var(--max-width); margin: 0 auto; padding: 16px; }
-h1 { font-size: 1.6rem; margin-top: 0.2em; }
-h2 { font-size: 1.2rem; margin-top: 2em; }
-.lede { color: var(--ink-2); font-size: 1.05rem; }
-a { color: var(--link); }
-.record-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 16px 0; }
-.stat-row { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
-.stat-tile { min-width: 140px; }
-.stat-value { display: block; font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.stat-label { display: block; color: var(--ink-2); font-size: 0.85rem; }
-.data-table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-.data-table caption { text-align: left; color: var(--ink-2); font-size: 0.85rem; margin-bottom: 4px; }
-.data-table th, .data-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
-.data-table { overflow-x: auto; display: block; }
+.skip-link { position: absolute; left: -999px; top: 0; background: var(--brand); color: var(--brand-ink); padding: 10px 16px; z-index: 20; border-radius: 0 0 var(--radius-sm) 0; font-weight: 600; }
+.skip-link:focus { left: 0; top: 0; }
+
+header {
+  background: var(--surface); /* fallback for browsers without color-mix() */
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px); -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
+}
+.header-inner { max-width: var(--max-width); margin: 0 auto; padding: var(--space-3) var(--space-5); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.site-title { font-weight: 800; text-decoration: none; color: var(--ink); font-size: 1.15rem; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+.site-title::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: linear-gradient(135deg, var(--brand), #1baf7a); }
+.nav-list { list-style: none; display: flex; gap: var(--space-1); margin: 0; padding: 0; }
+.nav-list a { color: var(--ink-2); text-decoration: none; padding: 8px 14px; border-radius: 999px; font-weight: 600; font-size: 0.92rem; transition: background 0.15s ease, color 0.15s ease; }
+.nav-list a:hover, .nav-list a:focus-visible { color: var(--ink); background: var(--muted-soft); }
+.nav-list a[aria-current="page"] { color: var(--brand-ink); background: var(--brand); }
+
+main { max-width: var(--max-width); margin: 0 auto; padding: var(--space-6) var(--space-5) var(--space-8); }
+
+h1 { font-size: clamp(1.9rem, 1.5rem + 1.6vw, 2.7rem); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 var(--space-3); font-weight: 800; }
+h2 { font-size: 1.35rem; letter-spacing: -0.01em; margin: 0 0 var(--space-4); font-weight: 750; }
+h3 { font-size: 1.05rem; margin: 0 0 var(--space-2); font-weight: 700; }
+p { margin: 0 0 var(--space-3); }
+a { color: var(--brand); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+
+.eyebrow { text-transform: uppercase; letter-spacing: 0.09em; font-size: 0.78rem; font-weight: 700; color: var(--brand); margin: 0 0 var(--space-2); }
+.hero { padding: var(--space-6) 0 var(--space-5); }
+.lede { color: var(--ink-2); font-size: 1.12rem; max-width: 62ch; margin: 0; }
+
+/* Every top-level content block is a card by default -- no per-call CSS
+   class needed in build_site.py's Python, since every one of them is
+   already a <section> or one of these specific containers. */
+main > section, .record-card, .notice {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: var(--space-5); margin: 0 0 var(--space-5); box-shadow: var(--shadow-sm);
+}
+main > section:hover, .record-card:hover { box-shadow: var(--shadow-md); }
+main > section, .record-card, .notice { transition: box-shadow 0.2s ease; }
+
+.record-card { background: linear-gradient(165deg, var(--surface) 0%, var(--surface-2) 100%); }
+.record-card h2 { margin-bottom: var(--space-4); }
+
+.stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); margin: 0 0 var(--space-4); }
+@media (min-width: 640px) { .stat-row { grid-template-columns: repeat(4, 1fr); } }
+.stat-tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: var(--space-4); position: relative; overflow: hidden;
+}
+.stat-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--brand); }
+.stat-value { display: block; font-size: clamp(1.5rem, 1.2rem + 1vw, 2.1rem); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.15; }
+.stat-label { display: block; color: var(--muted); font-size: 0.82rem; margin-top: var(--space-1); font-weight: 600; }
+
+.data-table { width: 100%; border-collapse: collapse; margin: 0; font-size: 0.94rem; overflow-x: auto; display: block; border: 1px solid var(--gridline); border-radius: var(--radius-sm); }
 .data-table thead, .data-table tbody { display: table; width: 100%; table-layout: fixed; }
-.squad-table .bench-row { color: var(--ink-2); }
-.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
-.badge-good { color: var(--good); }
-.badge-warning { color: var(--warning); }
-.badge-critical { color: var(--critical); }
-.badge-muted { color: var(--muted); }
-.notice { border-left: 4px solid var(--critical); background: var(--surface); padding: 12px 16px; margin: 16px 0; border-radius: 4px; }
-.misses-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.data-table caption { text-align: left; color: var(--muted); font-size: 0.8rem; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--gridline); background: var(--surface-2); caption-side: top; }
+.data-table th { text-align: left; padding: 10px var(--space-3); background: var(--surface-2); color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; border-bottom: 1px solid var(--gridline); }
+.data-table td { text-align: left; padding: 10px var(--space-3); border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover td { background: var(--surface-2); }
+.squad-table .bench-row td { color: var(--muted); }
+
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
+.badge-good { color: var(--good); background: var(--good-soft); }
+.badge-warning { color: var(--warning); background: var(--warning-soft); }
+.badge-critical { color: var(--critical); background: var(--critical-soft); }
+.badge-muted { color: var(--muted); background: var(--muted-soft); }
+
+.notice { border: 1px solid var(--critical-soft); background: var(--critical-soft); display: flex; gap: var(--space-3); align-items: flex-start; }
+.notice .badge { flex-shrink: 0; }
+
+.section-note { color: var(--muted); font-size: 0.9rem; margin-top: calc(var(--space-4) * -1 + var(--space-2)); margin-bottom: var(--space-4); }
+.misses-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-5); }
 @media (min-width: 640px) { .misses-grid { grid-template-columns: 1fr 1fr; } }
+.misses-grid h3 { color: var(--ink-2); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.misses-grid ul { margin: 0; padding-left: 1.1em; }
+.misses-grid li { margin-bottom: var(--space-2); }
+
 .pending { color: var(--muted); font-style: italic; }
-.commit-proof { font-size: 0.9rem; }
-.commit-proof.pending { color: var(--muted); }
-.chart-empty { color: var(--muted); font-style: italic; padding: 24px 0; }
-footer { max-width: var(--max-width); margin: 32px auto 0; padding: 16px; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); }
-.staleness-banner { text-align: center; padding: 8px 16px; font-size: 0.9rem; }
-.staleness-banner.staleness-warning { background: var(--warning); color: #1a1a19; }
+.commit-proof { font-size: 0.88rem; color: var(--muted); }
+.commit-proof a { font-weight: 600; }
+.commit-proof.pending { font-style: italic; }
+.chart-empty { color: var(--muted); font-style: italic; padding: var(--space-6) 0; text-align: center; }
+.deadline-note { color: var(--muted); font-size: 0.92rem; margin-top: calc(var(--space-3) * -1); }
+
+footer { max-width: var(--max-width); margin: var(--space-7) auto 0; padding: var(--space-5); color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); }
+footer p { margin: 0 0 var(--space-2); }
+footer p:last-child { margin-bottom: 0; }
+
+.staleness-banner { text-align: center; padding: var(--space-3) var(--space-4); font-size: 0.9rem; font-weight: 600; }
+.staleness-banner.staleness-warning { background: var(--warning-soft); color: var(--warning); }
 .staleness-banner.staleness-critical { background: var(--critical); color: #ffffff; }
 """
 

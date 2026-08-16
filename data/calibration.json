@@ -151,11 +151,11 @@
     "log_loss": null,
     "n": 0
   },
-  "rebuilt_at_utc": "2026-08-16T19:52:15Z",
+  "rebuilt_at_utc": "2026-08-16T20:28:20Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "68240d1f89034af8ca13045cf8a61c4ef6cb3312"
+  "source_commit": "9dbe6e63309eee322fa98a05e0a1c8bfe869c218"
 }

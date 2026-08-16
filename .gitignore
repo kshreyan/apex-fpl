@@ -21,19 +21,31 @@ artifacts/
 # this blanket rule since before Phase 13 existed; ~360KB/file, small
 # enough that committing it forever is not a real storage concern.
 
-# Files carved out of the data/external/ blanket ignore because the
-# LIVE prediction path (not just tests/backtesting) reads them --
-# CANONICAL_ROOT for why. Both gaps found the same way: the first two
-# live workflow runs crashed on FileNotFoundError, since these were
-# previously assumed to be dev-machine-local, test-only fixtures.
-#   - fixtures.csv + teams.csv, 2024-25 only: apex_fpl.serving.
-#     live_data.build_team_model_fixtures()'s fallback team-strength
-#     prior (TEAM_MODEL_FALLBACK_SEASONS).
-#   - merged_gw.csv, the 4 seasons scripts/run_production_
-#     recommendation.py's COLD_START_MINUTES_TRAIN_SEASONS names: the
-#     cold-start minutes model's real historical GW1 training rows.
-# If either constant changes, this carve-out needs to change with it --
-# see CLAUDE.md.
+# The 4 seasons scripts/run_production_recommendation.py's
+# COLD_START_MINUTES_TRAIN_SEASONS and apex_fpl.serving.live_data's
+# TEAM_MODEL_FALLBACK_SEASONS name are carved out of the data/external/
+# blanket ignore WHOLE (every file present locally for that season), not
+# file-by-file. File-by-file was tried first and broke: several
+# PRE-EXISTING Part A tests (test_ownership.py,
+# test_replay_manager_position_filter.py, test_scenario_builder.py)
+# gate on "does this season's data look present" with their own
+# `_data_available()`-style checks, keyed on merged_gw.csv/fixtures.csv
+# as a proxy for "the whole season is there" -- a proxy that was true
+# before this carve-out existed, and silently false once only SOME of a
+# season's files were committed, so those tests stopped skipping and
+# hard-failed on a DIFFERENT missing file instead. Committing each named
+# season in full (not just the specific file the live model reads)
+# keeps that "present means present" assumption true, at low cost: 3-6MB
+# per season, all of it CSV.
+#
+# All 3 live-workflow crashes this fixed, in order: fixtures.csv +
+# teams.csv missing for the team-model fallback (TEAM_MODEL_FALLBACK_
+# SEASONS); merged_gw.csv missing for the cold-start minutes model
+# (COLD_START_MINUTES_TRAIN_SEASONS); teams.csv/players_raw.csv missing
+# for the pre-existing tests above once merged_gw.csv alone existed.
+# data/canonical/ was checked and does NOT need the same treatment --
+# silver.run_build() (which predict.py always calls first) writes it
+# fresh from real live data on every run. See CLAUDE.md.
 data/external/*
 !data/external/vaastav/
 data/external/vaastav/*
@@ -41,13 +53,3 @@ data/external/vaastav/*
 !data/external/vaastav/2022-23/
 !data/external/vaastav/2023-24/
 !data/external/vaastav/2024-25/
-data/external/vaastav/2020-21/*
-data/external/vaastav/2022-23/*
-data/external/vaastav/2023-24/*
-data/external/vaastav/2024-25/*
-!data/external/vaastav/2020-21/merged_gw.csv
-!data/external/vaastav/2022-23/merged_gw.csv
-!data/external/vaastav/2023-24/merged_gw.csv
-!data/external/vaastav/2024-25/merged_gw.csv
-!data/external/vaastav/2024-25/fixtures.csv
-!data/external/vaastav/2024-25/teams.csv

@@ -1,0 +1,161 @@
+{
+  "biggest_misses": {
+    "binary_probability": [],
+    "points_forecast": []
+  },
+  "captaincy": {
+    "definition": "captain was the actual highest scorer among the selected starting XI that gameweek",
+    "hit_rate": null,
+    "hit_rate_suppressed": true,
+    "hits": 0,
+    "misses": 0,
+    "n": 0,
+    "per_gameweek": []
+  },
+  "coverage": {
+    "gameweeks_blank": [],
+    "gameweeks_missing_prediction": [],
+    "gameweeks_published": [
+      1
+    ],
+    "gameweeks_scored": [],
+    "total_gameweeks_season": 38
+  },
+  "metric_definitions": {
+    "brier_score": "mean((predicted_probability - outcome)^2) over all scored binary_probability calls",
+    "captaincy_hit": "captain was the actual highest scorer among the selected starting XI that gameweek",
+    "log_loss": "-mean(outcome*ln(p) + (1-outcome)*ln(1-p)), p clipped to [1e-6, 1-1e-6]",
+    "mae": "mean(abs(predicted - actual)) over all scored points_forecast calls"
+  },
+  "points_forecast_metrics": {
+    "by_call_kind": {},
+    "mae": null,
+    "mean_error": null,
+    "n": 0,
+    "rmse": null
+  },
+  "points_vs_baselines": {
+    "by_gameweek": [],
+    "cumulative_average_manager_points": 0.0,
+    "cumulative_model_points": 0.0,
+    "cumulative_template_team_points": 0.0,
+    "cumulative_top_10k_points": null,
+    "diff_vs_average_manager": 0.0,
+    "diff_vs_template_team": 0.0,
+    "diff_vs_top_10k": null
+  },
+  "probability_metrics": {
+    "brier_score": null,
+    "calibration_bins": [
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.0,
+          0.1
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.1,
+          0.2
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.2,
+          0.3
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.3,
+          0.4
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.4,
+          0.5
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.5,
+          0.6
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.6,
+          0.7
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.7,
+          0.8
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.8,
+          0.9
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      },
+      {
+        "actual_rate": null,
+        "bin_range": [
+          0.9,
+          1.0
+        ],
+        "n": 0,
+        "predicted_mean": null,
+        "suppressed": true
+      }
+    ],
+    "log_loss": null,
+    "n": 0
+  },
+  "rebuilt_at_utc": "2026-08-16T07:41:29Z",
+  "schema_version": "1.0",
+  "small_sample_policy": {
+    "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
+    "min_n_for_rate_display": 10
+  },
+  "source_commit": "0c28699eef6694877adb5ada026326843adabea5"
+}

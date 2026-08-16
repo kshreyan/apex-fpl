@@ -44,14 +44,15 @@ def test_load_clubs_parses_correctly(canonical_dir):
 
 def test_load_players_maps_element_type_to_gk_convention(canonical_dir):
     _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [{"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}])
-    _write_csv(canonical_dir / "players.csv", ["player_id", "web_name", "team_id", "element_type_id", "now_cost", "status", "retrieved_at"], [
-        {"player_id": "10", "web_name": "Raya", "team_id": "1", "element_type_id": "1", "now_cost": "60", "status": "a", "retrieved_at": "t"},
-        {"player_id": "11", "web_name": "Saka", "team_id": "1", "element_type_id": "3", "now_cost": "100", "status": "a", "retrieved_at": "t"},
+    _write_csv(canonical_dir / "players.csv", ["player_id", "web_name", "team_id", "element_type_id", "now_cost", "selected_by_percent", "status", "retrieved_at"], [
+        {"player_id": "10", "web_name": "Raya", "team_id": "1", "element_type_id": "1", "now_cost": "60", "selected_by_percent": "31.2", "status": "a", "retrieved_at": "t"},
+        {"player_id": "11", "web_name": "Saka", "team_id": "1", "element_type_id": "3", "now_cost": "100", "selected_by_percent": "45.0", "status": "a", "retrieved_at": "t"},
     ])
     players = ld.load_players()
     assert players["10"]["position"] == "GK"  # element_type_id=1 maps to "GK", NOT bootstrap-static's own "GKP" string
     assert players["11"]["position"] == "MID"
     assert players["10"]["price"] == 6.0
+    assert players["10"]["selected_by_percent"] == 31.2  # real API field is a string ("31.2"), parsed to float here
     assert players["10"]["team"] == "Arsenal"
 
 

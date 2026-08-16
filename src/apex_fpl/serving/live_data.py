@@ -62,10 +62,10 @@ def load_clubs() -> dict[int, str]:
 
 
 def load_players() -> dict[str, dict]:
-    """player_id -> {name, position, team, price} using the LATEST
-    snapshot's players.csv row (team/position/price can legitimately
-    change week to week — price via transfers, position/team far more
-    rarely, e.g. a very rare mid-season reclassification)."""
+    """player_id -> {name, position, team, price, selected_by_percent, status}
+    using the LATEST snapshot's players.csv row (team/position/price can
+    legitimately change week to week — price via transfers, position/team
+    far more rarely, e.g. a very rare mid-season reclassification)."""
     clubs = load_clubs()
     players = _latest_by_key(_read_csv("players.csv"), "player_id")
     out = {}
@@ -75,6 +75,7 @@ def load_players() -> dict[str, dict]:
             "position": POSITION_BY_ELEMENT_TYPE[int(r["element_type_id"])],
             "team": clubs[int(r["team_id"])],
             "price": int(r["now_cost"]) / 10.0,
+            "selected_by_percent": float(r["selected_by_percent"]),  # real API field is a string ("31.2"), confirmed against live data
             "status": r["status"],  # "a"=available, "i"=injured, "s"=suspended, etc. — bootstrap-static's own flag
         }
     return out

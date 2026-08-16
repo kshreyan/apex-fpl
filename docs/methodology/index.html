@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Methodology — APEX FPL</title>
+<meta name="description" content="How the APEX FPL model works, and what it doesn&#x27;t model.">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body data-rebuilt-at="2026-08-16T07:41:29Z">
+<a class="skip-link" href="#main">Skip to main content</a>
+<header>
+<div class="header-inner"><a class="site-title" href="/">APEX FPL</a><nav aria-label="Primary"><ul class="nav-list"><li><a href="/">Record</a></li><li><a href="/current/">This week</a></li><li><a href="/methodology/" aria-current="page">Methodology</a></li></ul></nav></div>
+</header>
+<div id="staleness-banner" class="staleness-banner" hidden></div>
+<main id="main">
+<h1>Methodology</h1><p>APEX FPL forecasts Fantasy Premier League points using a Monte Carlo simulation over modelled team goal expectations, per-player minutes and attacking-involvement shares, and a reduced-form bonus-points model, tournament-selected against simpler baselines on multi-season historical replay before being trusted in production.</p><h2>What it predicts</h2><ul><li>Expected points per starting player for the upcoming gameweek</li><li>A captaincy pick and the probability the captain scores 6 or more points</li><li>A projected total for the selected squad</li></ul><h2>What it does not model</h2><ul><li>Double gameweeks are only partially handled: a team's two fixtures are combined into one summed-goals match rather than simulated independently — a stated approximation, not a silent gap.</li><li>Rotation risk and press-conference team news are not incorporated intraday; the model runs once daily against whatever the FPL API currently reflects.</li><li>Price changes and transfer-market timing are not modelled — this project scores forecast accuracy and squad selection, not a transfer strategy.</li></ul><h2>Known weaknesses</h2><ul><li>"Actual points this gameweek" is read from the FPL API's most-recently-settled gameweek field, which is only reliable if scoring runs within days of a gameweek finishing — a real limitation if the automated pipeline is ever down across more than one full gameweek cycle.</li><li>The top-10k baseline is only available for gameweeks where a separate standings capture job has run — it will correctly show as unavailable, not zero, for earlier ones.</li></ul><h2>Backtests vs. live calls</h2><p>Any backfilled or backtested results referenced in this project's research reports are historical simulation, generated with hindsight, and are never combined with or presented alongside the live calibration record on this site. The record shown here is exclusively real predictions, committed before their deadlines.</p>
+</main>
+<footer>
+<p class="disclaimer">APEX FPL is an independent research project. It is not affiliated with, endorsed by, or connected to the Premier League or Fantasy Premier League. Fantasy Premier League, Premier League, and associated marks are trademarks of their respective owners.</p>
+<p class="build-note">Site last rebuilt 2026-08-16T07:41:29Z UTC · &copy; 2026 APEX FPL</p>
+</footer>
+<script src="/assets/staleness.js" defer></script>
+</body>
+</html>

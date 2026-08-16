@@ -10,7 +10,14 @@ __pycache__/
 # is fine to track; the actual snapshot payloads are not source and are large.
 data/snapshots/**
 data/logs/
-data/raw/
 data/canonical/
 data/external/
 artifacts/
+
+# data/raw/ (Phase 13 pipeline captures, data/raw/gw{n}/*.json) is
+# deliberately NOT ignored -- CLAUDE.md documents it as a committed,
+# immutable raw-capture tier alongside the prediction/result ledgers,
+# and every prediction's data_sources[].sha256 only means anything if
+# the file it points at is actually in the repo. It had been caught by
+# this blanket rule since before Phase 13 existed; ~360KB/file, small
+# enough that committing it forever is not a real storage concern.

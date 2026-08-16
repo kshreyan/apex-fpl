@@ -39,8 +39,8 @@ def _save_state(state: dict[str, list[str]]) -> None:
     STATE_PATH.write_text(json.dumps(state, indent=2))
 
 
-def _iter_snapshots(source: str) -> list[Path]:
-    src_dir = BRONZE_ROOT / source
+def _iter_snapshots(source: str, bronze_root: Path) -> list[Path]:
+    src_dir = bronze_root / source
     if not src_dir.exists():
         return []
     return sorted(p for p in src_dir.glob("*.json") if not p.name.endswith(".meta.json"))
@@ -147,14 +147,27 @@ def parse_fixtures(payload: list[dict[str, Any]], meta: dict[str, Any], snapshot
     ]
 
 
-def run_build() -> dict[str, int]:
+def run_build(bronze_root: Path | None = None) -> dict[str, int]:
     """Process every not-yet-processed Bronze snapshot, appending Silver rows.
-    Returns a count of rows appended per table."""
+    Returns a count of rows appended per table.
+
+    `bronze_root` defaults to this module's own BRONZE_ROOT (looked up
+    fresh from the module namespace, not bound at def time, for the same
+    monkeypatch-friendliness reason as bronze.py's snapshot_root — see
+    that module's docstring). Pass it explicitly to build Silver from a
+    different capture location, e.g. the live pipeline's per-gameweek
+    data/raw/gw{n}/ directory instead of data/snapshots/bronze/.
+    Deduplication is by payload content hash regardless of which root a
+    snapshot came from, so pointing this at a different root on a later
+    call is always safe -- it can only add rows Silver hasn't seen yet,
+    never duplicate ones it has.
+    """
+    resolved_root = bronze_root if bronze_root is not None else BRONZE_ROOT
     state = _load_state()
     processed = set(state["processed_hashes"])
     counts: dict[str, int] = {}
 
-    for payload_path in _iter_snapshots("bootstrap_static"):
+    for payload_path in _iter_snapshots("bootstrap_static", resolved_root):
         payload, meta = _read_snapshot(payload_path)
         h = meta["raw_payload_hash"]
         if h in processed:
@@ -169,7 +182,7 @@ def run_build() -> dict[str, int]:
             counts[name] = counts.get(name, 0) + len(tables[name])
         processed.add(h)
 
-    for payload_path in _iter_snapshots("fixtures"):
+    for payload_path in _iter_snapshots("fixtures", resolved_root):
         payload, meta = _read_snapshot(payload_path)
         h = meta["raw_payload_hash"]
         if h in processed:

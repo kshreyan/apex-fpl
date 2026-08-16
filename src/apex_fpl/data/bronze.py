@@ -10,12 +10,30 @@ timestamped file plus a sidecar metadata file recording provenance
 
 This module deliberately does NOT parse payloads into canonical entities
 (that is Silver-layer work, src/apex_fpl/entities/). Bronze's only job is
-faithful, immutable, provenance-tracked raw capture.
+faithful, immutable, provenance-tracked raw capture — including on a
+malformed or unexpectedly-shaped response: retry/backoff below only
+covers transient network failures (timeouts, connection errors, 5xx), not
+schema problems, and capture still succeeds and writes the raw bytes even
+if the payload's shape has changed underneath us. Schema validation is
+deliberately NOT here — it lives in pipeline/fpl_client.py instead, which
+wraps this module rather than modifying its capture-always-succeeds
+contract (see that module's docstring for why).
+
+`snapshot_root` is an optional override on both `capture_snapshot()` and
+`latest_snapshot()`, added so the live Phase-13 pipeline can write into a
+committed, per-gameweek location (data/raw/gw{n}/) instead of this
+module's own default (data/snapshots/bronze/, gitignored, symlinked to
+outside ~/Documents for local-launchd/TCC reasons — see
+docs/phase12_production_system_report.md). Every existing call site that
+doesn't pass it gets byte-for-byte the same behavior as before this
+parameter existed — see tests/unit/test_bronze.py's dedicated coverage
+for that claim, not just an assertion of it in prose.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,14 +82,33 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def fetch_raw(source: str, timeout: int = 30) -> tuple[bytes, int]:
+MAX_FETCH_ATTEMPTS = 4
+BACKOFF_BASE_SECONDS = 2.0
+BACKOFF_CAP_SECONDS = 30.0
+
+
+def fetch_raw(source: str, timeout: int = 30, max_attempts: int = MAX_FETCH_ATTEMPTS) -> tuple[bytes, int]:
+    """Capped exponential backoff on transient failures (timeouts,
+    connection errors, HTTP error status via raise_for_status) — 2s, 4s,
+    8s, capped at BACKOFF_CAP_SECONDS. A successful first attempt is
+    unaffected (no delay, same return value as before this existed). On
+    final exhaustion, re-raises the last real exception rather than
+    swallowing it — callers that already handled/propagated
+    RequestException see identical behavior to before, just later."""
     if source not in SOURCES:
         raise ValueError(f"unknown source {source!r}; known: {list(SOURCES)}")
-    resp = requests.get(
-        SOURCES[source], timeout=timeout, headers={"User-Agent": USER_AGENT}
-    )
-    resp.raise_for_status()
-    return resp.content, resp.status_code
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            resp = requests.get(SOURCES[source], timeout=timeout, headers={"User-Agent": USER_AGENT})
+            resp.raise_for_status()
+            return resp.content, resp.status_code
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                time.sleep(min(BACKOFF_BASE_SECONDS * (2 ** attempt), BACKOFF_CAP_SECONDS))
+    assert last_exc is not None
+    raise last_exc
 
 
 def _extract_event_ids(bootstrap_payload: dict[str, Any]) -> tuple[int | None, int | None]:
@@ -84,17 +121,25 @@ def _extract_event_ids(bootstrap_payload: dict[str, Any]) -> tuple[int | None, i
     return current, next_
 
 
-def capture_snapshot(source: str, season: str = "2026/27") -> Path:
+def capture_snapshot(source: str, season: str = "2026/27", snapshot_root: Path | None = None) -> Path:
     """Fetch `source` and write an immutable Bronze snapshot + metadata.
 
     Never overwrites an existing file. On a same-second collision (two
     captures of the same source within one second) a numeric suffix is
     appended rather than clobbering the earlier snapshot.
+
+    `snapshot_root` defaults to this module's own SNAPSHOT_ROOT (looked
+    up fresh from the module namespace on every call, not bound at def
+    time — this is what makes existing tests' `monkeypatch.setattr(bronze,
+    "SNAPSHOT_ROOT", tmp_path)` pattern keep working unchanged). Pass it
+    explicitly to write somewhere else, e.g. the live pipeline's
+    data/raw/gw{n}/ (see module docstring).
     """
+    resolved_root = snapshot_root if snapshot_root is not None else SNAPSHOT_ROOT
     raw, status = fetch_raw(source)
     ts = _utc_now_compact()
 
-    out_dir = SNAPSHOT_ROOT / source
+    out_dir = resolved_root / source
     out_dir.mkdir(parents=True, exist_ok=True)
 
     payload_path = out_dir / f"{ts}.json"
@@ -135,9 +180,10 @@ def capture_all(season: str = "2026/27") -> dict[str, Path]:
     return {source: capture_snapshot(source, season=season) for source in SOURCES}
 
 
-def latest_snapshot(source: str) -> Path | None:
+def latest_snapshot(source: str, snapshot_root: Path | None = None) -> Path | None:
     """Return the most recent payload path for `source`, or None if none exist."""
-    out_dir = SNAPSHOT_ROOT / source
+    resolved_root = snapshot_root if snapshot_root is not None else SNAPSHOT_ROOT
+    out_dir = resolved_root / source
     if not out_dir.exists():
         return None
     payloads = sorted(p for p in out_dir.glob("*.json") if not p.name.endswith(".meta.json"))

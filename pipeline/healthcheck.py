@@ -172,6 +172,52 @@ def check_raw_capture_hashes() -> CheckResult:
     return CheckResult("raw_capture_hashes", True, "every current prediction's referenced raw capture exists and matches its recorded sha256")
 
 
+def check_no_unavailable_player_in_published_squad() -> CheckResult:
+    """The correctness bug this project's own site named as its highest
+    priority (Phase 13 Block 0): cross-references each gameweek's latest
+    PUBLISHED squad against the exact raw bootstrap-static snapshot
+    predict.py saw when it built that squad -- not a fresh live re-check,
+    which would test whether the world has since changed, not whether
+    OUR OWN selection logic worked on the data it actually had. Fails if
+    any starting/bench player had zero availability probability
+    (apex_fpl.serving.live_data.player_availability_probability) at
+    generation time."""
+    from apex_fpl.serving.live_data import player_availability_probability
+
+    problems: list[str] = []
+    if not PREDICTIONS_DIR.exists():
+        return CheckResult("no_unavailable_in_squad", True, "no predictions yet")
+
+    for ledger_path in sorted(PREDICTIONS_DIR.glob("gw*.jsonl")):
+        lines = _read_ledger_lines(ledger_path)
+        if not lines:
+            continue
+        prediction = lines[-1]
+        if prediction["status"] != "PUBLISHED":
+            continue
+        bs_source = next((s for s in prediction.get("data_sources", []) if s["source"] == "bootstrap_static"), None)
+        if bs_source is None:
+            problems.append(f"{ledger_path.name}: PUBLISHED prediction has no bootstrap_static data_source to check against")
+            continue
+        raw_path = REPO_ROOT / bs_source["raw_cache_path"]
+        if not raw_path.exists():
+            problems.append(f"{ledger_path.name}: referenced raw snapshot {bs_source['raw_cache_path']} is missing")
+            continue
+        by_id = {str(el["id"]): el for el in json.loads(raw_path.read_bytes())["elements"]}
+
+        for p in prediction["squad"]["starting_xi"] + prediction["squad"]["bench_order"]:
+            el = by_id.get(p["player_id"])
+            if el is None:
+                continue  # a player id absent from the snapshot isn't this check's concern
+            prob = player_availability_probability(el["status"], el.get("chance_of_playing_this_round"), el.get("chance_of_playing_next_round"))
+            if prob <= 0.0:
+                problems.append(f"{ledger_path.name}: {p['name']} (status={el['status']!r}) was unavailable when this squad was published")
+
+    if problems:
+        return CheckResult("no_unavailable_in_squad", False, "; ".join(problems))
+    return CheckResult("no_unavailable_in_squad", True, "no published squad contains a player who was unavailable at generation time")
+
+
 def check_ledger_integrity() -> CheckResult:
     """Structural integrity of the append-only ledgers themselves: valid
     JSON per line, record_id matches its own recomputed content hash
@@ -264,6 +310,7 @@ LOCAL_CHECKS = [
     check_workflow_actions_are_sha_pinned,
     check_raw_captures_not_gitignored,
     check_raw_capture_hashes,
+    check_no_unavailable_player_in_published_squad,
     check_ledger_integrity,
     check_calibration_json,
 ]

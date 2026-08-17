@@ -229,6 +229,66 @@ def test_raw_capture_hashes_catch_a_missing_file(repo):
     assert "missing" in result.detail
 
 
+# ------------------------------------------------- unavailable-player check
+
+def _bootstrap_with_elements(elements):
+    return {"elements": elements}
+
+
+def _squad_player(pid, name="Player"):
+    return {"player_id": pid, "name": name, "position": "MID", "team": "Arsenal", "price": 5.0}
+
+
+def _published_prediction(raw_path_rel, squad_player_ids):
+    return {
+        "record_id": "irrelevant", "status": "PUBLISHED",
+        "data_sources": [{"source": "bootstrap_static", "raw_cache_path": raw_path_rel, "sha256": "unused-by-this-check"}],
+        "squad": {
+            "starting_xi": [_squad_player(pid) for pid in squad_player_ids[:11]],
+            "bench_order": [_squad_player(pid) for pid in squad_player_ids[11:]],
+            "captain_player_id": squad_player_ids[0], "vice_captain_player_id": squad_player_ids[1],
+        },
+    }
+
+
+def test_no_unavailable_in_squad_passes_for_a_fully_available_squad(repo):
+    raw_path = repo / "data" / "raw" / "gw01" / "bootstrap_static" / "snap.json"
+    elements = [{"id": i, "status": "a", "chance_of_playing_this_round": None, "chance_of_playing_next_round": None} for i in range(1, 16)]
+    _write(raw_path, json.dumps(_bootstrap_with_elements(elements)))
+    pred = _published_prediction("data/raw/gw01/bootstrap_static/snap.json", [str(i) for i in range(1, 16)])
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [pred])
+
+    result = healthcheck.check_no_unavailable_player_in_published_squad()
+
+    assert result.passed, result.detail
+
+
+def test_no_unavailable_in_squad_catches_a_zero_chance_player_in_the_squad(repo):
+    raw_path = repo / "data" / "raw" / "gw01" / "bootstrap_static" / "snap.json"
+    elements = [{"id": i, "status": "a", "chance_of_playing_this_round": None, "chance_of_playing_next_round": None} for i in range(1, 16)]
+    elements[0] = {"id": 1, "status": "i", "chance_of_playing_this_round": None, "chance_of_playing_next_round": 0, "web_name": "Injured"}
+    _write(raw_path, json.dumps(_bootstrap_with_elements(elements)))
+    pred = _published_prediction("data/raw/gw01/bootstrap_static/snap.json", [str(i) for i in range(1, 16)])
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [pred])
+
+    result = healthcheck.check_no_unavailable_player_in_published_squad()
+
+    assert not result.passed
+    assert "status='i'" in result.detail
+
+
+def test_no_unavailable_in_squad_ignores_non_published_predictions(repo):
+    raw_path = repo / "data" / "raw" / "gw01" / "bootstrap_static" / "snap.json"
+    elements = [{"id": 1, "status": "i", "chance_of_playing_this_round": None, "chance_of_playing_next_round": 0}]
+    _write(raw_path, json.dumps(_bootstrap_with_elements(elements)))
+    pred = {"record_id": "irrelevant", "status": "BLANK_GAMEWEEK", "data_sources": [], "squad": None}
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [pred])
+
+    result = healthcheck.check_no_unavailable_player_in_published_squad()
+
+    assert result.passed, result.detail
+
+
 # --------------------------------------------------------- calibration.json
 
 def test_calibration_json_passes_with_a_real_source_commit(repo):

@@ -295,6 +295,27 @@ def _missing_predictions_notice(missing_gws: list[int]) -> Raw:
     )
 
 
+def _squad_recomputation_caveat() -> Raw:
+    """Phase 13 Block 0.2: an honesty caveat, not a bug disclosure. The
+    squad shown is recomputed unconstrained every gameweek -- it has no
+    memory of a prior squad, so it is not telling you which players to
+    transfer in or out, and the points-vs-baselines comparison elsewhere
+    on this site does not deduct transfer costs (\"hits\") because the
+    model does not take any transfers to get there. Shown on both / and
+    /current/ -- see CLAUDE.md's execution-failure-policy section for
+    the related standing rule this pairs with."""
+    return raw(
+        '<div class="notice notice-warning" role="note">'
+        f'{_status_badge("Read this first", "warning")} '
+        "This squad is recomputed from scratch every gameweek — it has no memory of a "
+        "previous squad, so it is not a transfer recommendation (it will not tell you who to "
+        "sell or buy) and it is not a playable week-to-week plan. Points shown vs. baselines "
+        "elsewhere on this site do not account for transfer costs or hits, because the model "
+        "does not model taking any."
+        "</div>"
+    )
+
+
 def _biggest_misses_section(misses: dict) -> Raw:
     def _points_row(m: dict) -> str:
         subj = m["subject"]
@@ -393,6 +414,7 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
         "hits and misses alike, shown here plainly.</p>"
         "</div>"
         f"{_missing_predictions_notice(cov['gameweeks_missing_prediction'] or [])}"
+        f"{_squad_recomputation_caveat()}"
         f"{_record_summary_fragment(calibration)}"
         '<section aria-labelledby="calib-heading">'
         '<h2 id="calib-heading">Calibration: predicted probability vs. reality</h2>'
@@ -417,8 +439,9 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
 
 def build_current_page(calibration: dict, predictions: dict[int, list[dict]]) -> str:
     record = _record_summary_fragment(calibration)
+    caveat = _squad_recomputation_caveat()
     if not predictions:
-        body = raw(f"{record}<h1>This week</h1><p>No live prediction has been published yet.</p>")
+        body = raw(f"{record}{caveat}<h1>This week</h1><p>No live prediction has been published yet.</p>")
         return _page("This week", "This week's live FPL picks from APEX FPL.", "/current/", body, calibration["rebuilt_at_utc"])
 
     gw = max(predictions)
@@ -439,6 +462,7 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]]) ->
 
     body = raw(
         f"{record}"
+        f"{caveat}"
         f"<h1>This week: GW{gw}</h1>"
         f'<p class="deadline-note">Deadline: {esc(prediction["deadline_time_utc"])} UTC</p>'
         f"{picks_html}"
@@ -501,15 +525,35 @@ def build_methodology_page(rebuilt_at_utc: str) -> str:
     body = raw(
         "<h1>Methodology</h1>"
         "<p>APEX FPL forecasts Fantasy Premier League points using a Monte Carlo simulation "
-        "over modelled team goal expectations, per-player minutes and attacking-involvement "
-        "shares, and a reduced-form bonus-points model, tournament-selected against simpler "
-        "baselines on multi-season historical replay before being trusted in production.</p>"
+        "over modelled team goal expectations and per-player minutes and attacking-involvement "
+        "shares, tournament-selected against simpler baselines on multi-season historical replay "
+        "before being trusted in production. It does not currently model bonus points at all — "
+        "see the disclosure below, which is not a footnote.</p>"
+        '<section class="notice notice-warning" aria-labelledby="bias-heading">'
+        '<h2 id="bias-heading">Known, current bias — read this before trusting a projection</h2>'
+        "<p>Every points projection on this site assumes <strong>zero bonus points</strong>, for "
+        "every player, every gameweek. This is not a rounding simplification: the live model "
+        "literally never adds a bonus term. A BPS-aware simulator was built and validated during "
+        "this project's research phase, but was never promoted to production — the champion model "
+        "that actually runs live does not include it. Bonus points concentrate in a small number of "
+        "high-involvement archetypes (nailed-on premium attackers, high-tackle/high-CBI defenders), "
+        "so this systematically <em>underrates</em> exactly those players, every week, in a "
+        "predictable direction — not random noise.</p>"
+        "<p>Separately: 2025/26 introduced Defensive Contribution (DefCon) points, a real scoring "
+        "category this model does not compute at all. The raw stats DefCon is based on (tackles, "
+        "clearances, blocks, interceptions, recoveries) are already being captured from the live API "
+        "but are not yet validated or used anywhere in this pipeline.</p>"
+        "<p><strong>Combined, defender valuations are the least reliable output on this site.</strong> "
+        "A cheap, defensively-active defender's real point potential is currently invisible to the "
+        "model twice over. Treat defender picks here with the most scepticism of anything shown.</p>"
+        "</section>"
         "<h2>What it predicts</h2>"
         "<ul><li>Expected points per starting player for the upcoming gameweek</li>"
         "<li>A captaincy pick and the probability the captain scores 6 or more points</li>"
         "<li>A projected total for the selected squad</li></ul>"
         "<h2>What it does not model</h2>"
         "<ul>"
+        "<li>Bonus points and Defensive Contribution points — see the disclosure above.</li>"
         "<li>Double gameweeks are only partially handled: a team's two fixtures are combined "
         "into one summed-goals match rather than simulated independently — a stated "
         "approximation, not a silent gap.</li>"
@@ -517,6 +561,9 @@ def build_methodology_page(rebuilt_at_utc: str) -> str:
         "model runs once daily against whatever the FPL API currently reflects.</li>"
         "<li>Price changes and transfer-market timing are not modelled — this project scores "
         "forecast accuracy and squad selection, not a transfer strategy.</li>"
+        "<li>The squad shown is not a transfer plan: it is recomputed from scratch every "
+        "gameweek with no memory of a previous squad, so it never tells you who to sell or buy, "
+        "and points shown vs. baselines elsewhere on this site do not deduct transfer costs.</li>"
         "</ul>"
         "<h2>Known weaknesses</h2>"
         "<ul>"
@@ -649,6 +696,7 @@ main > section, .record-card, .notice { transition: box-shadow 0.2s ease; }
 
 .notice { border: 1px solid var(--critical-soft); background: var(--critical-soft); display: flex; gap: var(--space-3); align-items: flex-start; }
 .notice .badge { flex-shrink: 0; }
+.notice-warning { border-color: var(--warning-soft); background: var(--warning-soft); }
 
 .section-note { color: var(--muted); font-size: 0.9rem; margin-top: calc(var(--space-4) * -1 + var(--space-2)); margin-bottom: var(--space-4); }
 .misses-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-5); }

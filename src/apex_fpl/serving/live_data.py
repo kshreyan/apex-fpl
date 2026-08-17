@@ -61,15 +61,62 @@ def load_clubs() -> dict[int, str]:
     return {int(r["club_id"]): r["name"] for r in rows.values()}
 
 
+def _parse_chance(value) -> int | None:
+    """players.csv stores chance_of_playing_*_round as a CSV cell -- an
+    empty string for a real None (Silver's CSV writer has no other way to
+    represent it), or a digit string for a real percentage."""
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def player_availability_probability(status: str, chance_this_round: int | None, chance_next_round: int | None) -> float:
+    """A 0.0-1.0 probability this player is fully fit and picked for the
+    gameweek being predicted.
+
+    Verified against real live data (2026-08-16 bootstrap-static
+    snapshot), not assumed: every one of 494 status='a' players had
+    chance_of_playing_this_round = None -- None means "no doubt flagged,
+    fully expected to play," not "unknown, exclude." Getting this
+    backwards would zero out the entire healthy player pool, which is
+    most of it.
+
+    Second real finding from the same check: pre-season,
+    chance_of_playing_this_round was None for EVERY player, healthy or
+    not -- "this round" isn't well-defined until a round is actually
+    current. chance_of_playing_next_round already carried the real
+    signal for GW1 (0 for clear injuries, 75 for knocks). So this
+    prefers this_round when set (more current, once a round exists),
+    falls back to next_round (the populated signal pre-season and the
+    normal case when predicting an upcoming gameweek), and only falls
+    back to a status-derived default if both are null -- empirically the
+    rare case: every non-'a' player in the same snapshot had at least
+    one of the two populated.
+
+    The status-derived fallback is asymmetric on purpose: a flagged-but-
+    unquantified doubt defaults to 0 (excluded), not 50/50 -- the cost of
+    wrongly excluding a fine player (they just aren't picked this week)
+    is far smaller than the cost of wrongly including a genuinely
+    unavailable one (a blank squad slot, or worse, a captained zero)."""
+    if chance_this_round is not None:
+        return chance_this_round / 100.0
+    if chance_next_round is not None:
+        return chance_next_round / 100.0
+    return 1.0 if status == "a" else 0.0
+
+
 def load_players() -> dict[str, dict]:
-    """player_id -> {name, position, team, price, selected_by_percent, status}
-    using the LATEST snapshot's players.csv row (team/position/price can
-    legitimately change week to week — price via transfers, position/team
-    far more rarely, e.g. a very rare mid-season reclassification)."""
+    """player_id -> {name, position, team, price, selected_by_percent,
+    status, availability_probability} using the LATEST snapshot's
+    players.csv row (team/position/price can legitimately change week to
+    week — price via transfers, position/team far more rarely, e.g. a
+    very rare mid-season reclassification)."""
     clubs = load_clubs()
     players = _latest_by_key(_read_csv("players.csv"), "player_id")
     out = {}
     for pid, r in players.items():
+        chance_this = _parse_chance(r.get("chance_of_playing_this_round"))
+        chance_next = _parse_chance(r.get("chance_of_playing_next_round"))
         out[pid] = {
             "name": r["web_name"],
             "position": POSITION_BY_ELEMENT_TYPE[int(r["element_type_id"])],
@@ -77,6 +124,7 @@ def load_players() -> dict[str, dict]:
             "price": int(r["now_cost"]) / 10.0,
             "selected_by_percent": float(r["selected_by_percent"]),  # real API field is a string ("31.2"), confirmed against live data
             "status": r["status"],  # "a"=available, "i"=injured, "s"=suspended, etc. — bootstrap-static's own flag
+            "availability_probability": player_availability_probability(r["status"], chance_this, chance_next),
         }
     return out
 

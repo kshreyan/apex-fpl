@@ -60,6 +60,13 @@ BOOTSTRAP_LIST_FIELD_SPECS: dict[str, dict[str, type | tuple[type, ...]]] = {
         "status": str, "now_cost": int,
         "selected_by_percent": str,  # confirmed: a string in the real API, not a number
         "event_points": int,  # points scored in the most recently settled gameweek -- see pipeline/score.py's docstring for the staleness caveat this implies
+        # both nullable ints, confirmed against real live data (2026-08-16
+        # snapshot): status='a' players have chance_of_playing_this_round
+        # uniformly None (no doubt flagged, NOT "unknown") -- see
+        # apex_fpl.serving.live_data.player_availability_probability for
+        # the null-handling this schema entry protects.
+        "chance_of_playing_this_round": _NULLABLE_INT,
+        "chance_of_playing_next_round": _NULLABLE_INT,
     },
     "element_types": {
         "id": int, "squad_select": int, "squad_min_play": int, "squad_max_play": int,

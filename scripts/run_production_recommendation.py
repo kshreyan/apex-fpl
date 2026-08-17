@@ -205,7 +205,7 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
             exp_assists = team_exp_goals_total * share * 0.8  # assists are slightly less concentrated than goals in real data (spec Part XI); a rough, stated proxy, not fit from data
 
         players_for_sim.append(mc.PlayerInput(player_id=pid, team=team, position=meta["position"], minutes_forecast=mfc, expected_goals=exp_goals, expected_assists=exp_assists))
-        candidates_meta[pid] = {"name": meta["name"], "team": team, "position": meta["position"], "price": meta["price"]}
+        candidates_meta[pid] = {"name": meta["name"], "team": team, "position": meta["position"], "price": meta["price"], "availability_probability": meta["availability_probability"]}
 
     log(f"Players entering simulation: {len(players_for_sim)}\n")
 
@@ -216,7 +216,7 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     log(f"Simulations run: {total_sims}\n")
 
     log("--- Selecting squad (EV optimizer, the confirmed champion) ---")
-    candidates = [sq.PlayerCandidate(pid, m["position"], m["team"], m["price"], sim_results[pid].mean_points) for pid, m in candidates_meta.items() if pid in sim_results]
+    candidates = [sq.PlayerCandidate(pid, m["position"], m["team"], m["price"], sim_results[pid].mean_points, m["availability_probability"]) for pid, m in candidates_meta.items() if pid in sim_results]
     squad = sq.select_squad(candidates, budget=sq.BUDGET)
     xi = sq.select_starting_xi(squad)
     captain_haul_probability = float((sim_results[xi.captain.player_id].samples >= CAPTAIN_HAUL_THRESHOLD).mean())

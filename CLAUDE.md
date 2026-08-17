@@ -34,6 +34,36 @@ handle its absence correctly (`top_10k_average` reports `null`, not a
 wrong number), so nothing is broken by its absence, but it's real,
 not-yet-started work, not a design gap.
 
+## The real FPL entry: execution is human-in-the-loop, and failure is not reconciled away
+
+A real FPL entry plays this model's picks, starting GW1. Its rank, picks,
+chips, and transfers are third-party-verifiable via the public FPL API —
+a stronger claim than anything this project asserts about itself.
+
+Two standing rules, decided before GW1, not after:
+
+- **Execution is manual by design and stays that way.** The model
+  computes a recommendation; a human enters it in the real account
+  before each deadline. Automating the actual team-setting would require
+  storing FPL session credentials as a secret this project has
+  deliberately gone out of its way not to need anywhere else in its
+  design — that trade was rejected on purpose, not overlooked. Do not
+  wire real-account execution into `pipeline.yml` or any other automated
+  path.
+- **A missed deadline is a permanent, disclosed fact, never a quiet
+  fix.** If the real entry's actual picks ever diverge from what the
+  model recommended because the manual entry step didn't happen in time,
+  that is recorded as a manual execution failure — not corrected,
+  not backdated, not silently reconciled to match the model's ledger.
+  It's shown on the site and the entry's real rank carries the
+  consequence permanently, the same way a missing prediction already
+  does (see the data taxonomy below: `coverage.gameweeks_missing_
+  prediction`'s rendering is the existing precedent this follows). This
+  rule is written down now, before the persistent-squad-state ledger
+  that will formally detect and record such a divergence exists — see
+  the transfers/chips work — specifically so it can't be quietly
+  softened once decided.
+
 ## Data taxonomy
 
 Everything under `data/` is exactly one of three kinds. Knowing which

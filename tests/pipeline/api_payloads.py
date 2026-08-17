@@ -33,10 +33,15 @@ def _default_element_types():
     ]
 
 
-def make_element(id_, team, element_type, web_name="Player", now_cost=50, selected_by_percent="10.0", status="a", event_points=0):
+def make_element(id_, team, element_type, web_name="Player", now_cost=50, selected_by_percent="10.0", status="a", event_points=0,
+                  chance_of_playing_this_round=None, chance_of_playing_next_round=None):
     return {
         "id": id_, "web_name": web_name, "team": team, "element_type": element_type,
         "status": status, "now_cost": now_cost, "selected_by_percent": selected_by_percent, "event_points": event_points,
+        # None is the real, confirmed default for a healthy ('a') player -- not "unknown".
+        # See apex_fpl.serving.live_data.player_availability_probability.
+        "chance_of_playing_this_round": chance_of_playing_this_round,
+        "chance_of_playing_next_round": chance_of_playing_next_round,
     }
 
 

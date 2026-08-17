@@ -56,6 +56,53 @@ def test_load_players_maps_element_type_to_gk_convention(canonical_dir):
     assert players["10"]["team"] == "Arsenal"
 
 
+def test_load_players_computes_availability_probability(canonical_dir):
+    _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [{"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}])
+    _write_csv(
+        canonical_dir / "players.csv",
+        ["player_id", "web_name", "team_id", "element_type_id", "now_cost", "selected_by_percent", "status",
+         "chance_of_playing_this_round", "chance_of_playing_next_round", "retrieved_at"],
+        [
+            # healthy player: both null -- must be 100%, not excluded. This is the real,
+            # confirmed shape for the vast majority of the player pool.
+            {"player_id": "1", "web_name": "Healthy", "team_id": "1", "element_type_id": "1", "now_cost": "50",
+             "selected_by_percent": "10.0", "status": "a", "chance_of_playing_this_round": "", "chance_of_playing_next_round": "",
+             "retrieved_at": "t"},
+            # this_round populated: takes priority over next_round
+            {"player_id": "2", "web_name": "ThisRound", "team_id": "1", "element_type_id": "2", "now_cost": "50",
+             "selected_by_percent": "10.0", "status": "d", "chance_of_playing_this_round": "75", "chance_of_playing_next_round": "0",
+             "retrieved_at": "t"},
+            # this_round null, next_round populated -- the real pre-season shape confirmed
+            # against live data: falls back to next_round.
+            {"player_id": "3", "web_name": "NextRoundOnly", "team_id": "1", "element_type_id": "3", "now_cost": "50",
+             "selected_by_percent": "10.0", "status": "d", "chance_of_playing_this_round": "", "chance_of_playing_next_round": "25",
+             "retrieved_at": "t"},
+            # both null, non-'a' status: the rare defensive fallback -- excluded, not 50/50.
+            {"player_id": "4", "web_name": "FlaggedNoNumber", "team_id": "1", "element_type_id": "4", "now_cost": "50",
+             "selected_by_percent": "10.0", "status": "i", "chance_of_playing_this_round": "", "chance_of_playing_next_round": "",
+             "retrieved_at": "t"},
+        ],
+    )
+    players = ld.load_players()
+    assert players["1"]["availability_probability"] == 1.0
+    assert players["2"]["availability_probability"] == 0.75
+    assert players["3"]["availability_probability"] == 0.25
+    assert players["4"]["availability_probability"] == 0.0
+
+
+@pytest.mark.parametrize("status,this_round,next_round,expected", [
+    ("a", None, None, 1.0),
+    ("d", 75, None, 0.75),
+    ("d", None, 25, 0.25),
+    ("i", 0, None, 0.0),
+    ("i", None, None, 0.0),
+    ("s", None, None, 0.0),
+    ("d", 0, 100, 0.0),  # this_round takes priority even when next_round disagrees
+])
+def test_player_availability_probability_priority_order(status, this_round, next_round, expected):
+    assert ld.player_availability_probability(status, this_round, next_round) == expected
+
+
 def test_load_finished_fixtures_filters_to_finished_only(canonical_dir):
     _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [
         {"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}, {"club_id": "2", "name": "Chelsea", "retrieved_at": "t"},

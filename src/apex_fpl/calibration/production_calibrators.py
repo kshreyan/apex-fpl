@@ -1,5 +1,24 @@
 """Production calibrators — validated in Phase 5 (docs/phase5_calibration_report.md)
-and wired into the live pipeline here.
+and wired into `apex_fpl.backtesting.replay`/`scenario_builder` (see
+docs/phase5_production_wiring_report.md).
+
+NOT currently wired into `scripts/run_production_recommendation.py` —
+the module that actually generates the live, published site prediction.
+This isn't an oversight to silently fix by importing it there: this
+calibrator's isotonic map (see `MINUTES_HALFLIFE`) is fit specifically
+against `apex_fpl.models.minutes.challengers.exponential_decay`'s raw
+P(60+) distribution, but the live path currently runs
+`apex_fpl.models.minutes.cold_start` instead (no in-season history
+exists yet to fit `exponential_decay` on) — and `cold_start`'s own
+isotonic-regression-on-real-GW1-outcomes IS already its calibration.
+Applying this calibrator on top of `cold_start`'s output would apply a
+correction fit for a different model's miscalibration pattern to the
+wrong distribution. This module becomes a live-wiring task once the
+live path transitions to `exponential_decay` in-season (the promotion
+schedule's minutes-transition item), not before. Found and left
+correctly unwired, not silently used, during a Block 1.1 unwired-module
+audit that initially mis-flagged this as dead code — worth spelling out
+here so the next read of this file doesn't repeat that mistake.
 
 Fitted ONCE on a dedicated calibration-fitting season (2020-21, chosen
 specifically because it is NOT used anywhere else in this project — not

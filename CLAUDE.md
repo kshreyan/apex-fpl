@@ -11,20 +11,28 @@ not reconstructed after the fact.
 
 ## System overview
 
-One workflow, `pipeline.yml`, runs daily (`06:23 UTC`) and on manual
-dispatch. It always checks in; whether it *acts* is decided by
-`pipeline/predict.py`'s own phase/deadline logic (`pipeline/gw_state.py`),
-never by the cron schedule itself. In order: `predict.py` (writes at
-most one new line to `data/predictions/gw{n}.jsonl`, commits and pushes
-immediately) → `score.py` (scores any settled gameweek with no result
-yet) → `metrics.py` (fully rebuilds `data/calibration.json` from the
-ledgers) → `build_site.py` (fully rebuilds `/docs`) → a second commit
-and push (`data`, `docs`) → deploy to GitHub Pages via
-`actions/deploy-pages`. A separate weekly workflow,
-`healthcheck.yml`, runs `pipeline/healthcheck.py` to catch the failure
-modes a green daily run can't see itself failing (see that module's own
-docstring). Both open or update a GitHub issue on failure; `RUNBOOK.md`
-covers what to do about each one.
+One workflow, `pipeline.yml`, runs daily (`06:23 UTC`, the anchor tick)
+and hourly (`:37`, a cheap-gated tick that only does anything inside the
+24h closing window before a deadline — see `pipeline/should_run_now.py`
+and Block 1.6), plus on manual dispatch. It always checks in; whether it
+*acts* is decided by `pipeline/predict.py`'s own phase/deadline logic
+(`pipeline/gw_state.py`), never by the cron schedule itself. In order:
+`predict.py` (writes at most one new line to
+`data/predictions/gw{n}.jsonl`, commits and pushes immediately) →
+`predict_transfers.py` (Block 2.5 — writes at most one new line to
+`data/transfer_recommendations/gw{n}.jsonl`; structurally separate from
+`predict.py`, wired as a genuinely best-effort step that logs a warning
+and never fails the job, since it depends on the real FPL entry's own
+squad state existing, which `predict.py`'s core guarantee does not) →
+`score.py` (scores any settled gameweek with no result yet) →
+`metrics.py` (fully rebuilds `data/calibration.json` from the ledgers)
+→ `build_site.py` (fully rebuilds `/docs`) → a second commit and push
+(`data`, `docs`) → deploy to GitHub Pages via `actions/deploy-pages`. A
+separate weekly workflow, `healthcheck.yml`, runs
+`pipeline/healthcheck.py` to catch the failure modes a green daily run
+can't see itself failing (see that module's own docstring). Both open
+or update a GitHub issue on failure; `RUNBOOK.md` covers what to do
+about each one.
 
 **Not yet built:** the standings-capture job (`leagues-classic/314`,
 paginated, extract-only per the Stage 1 privacy decision below) that
@@ -59,10 +67,16 @@ Two standing rules, decided before GW1, not after:
   consequence permanently, the same way a missing prediction already
   does (see the data taxonomy below: `coverage.gameweeks_missing_
   prediction`'s rendering is the existing precedent this follows). This
-  rule is written down now, before the persistent-squad-state ledger
-  that will formally detect and record such a divergence exists — see
-  the transfers/chips work — specifically so it can't be quietly
-  softened once decided.
+  rule was written down before the squad-state reader existed,
+  specifically so it couldn't be quietly softened once that piece
+  landed. **Status as of Block 2.5:** `apex_fpl.serving.entry_state` now
+  reads the real entry's actual squad each settled gameweek (public API,
+  no credentials) and feeds it into the transfer recommendation
+  (`pipeline/predict_transfers.py`) — but it does not yet COMPARE that
+  real squad against what `predict.py` published for the same gameweek,
+  or render a divergence on the site. The reader exists; the
+  divergence-detection-and-display half of this rule is still real,
+  undone work, not silently completed by the reader's existence.
 
 ## Data taxonomy
 

@@ -57,6 +57,7 @@ from pipeline.site.htmlgen import Raw, esc, raw
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
+TRANSFER_RECOMMENDATIONS_DIR = REPO_ROOT / "data" / "transfer_recommendations"
 RESULTS_DIR = REPO_ROOT / "data" / "results"
 CALIBRATION_PATH = REPO_ROOT / "data" / "calibration.json"
 DOCS_ROOT = REPO_ROOT / "docs"
@@ -106,6 +107,12 @@ def _all_results() -> dict[int, list[dict]]:
     if not RESULTS_DIR.exists():
         return {}
     return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(RESULTS_DIR.glob("gw*.jsonl"))}
+
+
+def _all_transfer_recommendations() -> dict[int, list[dict]]:
+    if not TRANSFER_RECOMMENDATIONS_DIR.exists():
+        return {}
+    return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(TRANSFER_RECOMMENDATIONS_DIR.glob("gw*.jsonl"))}
 
 
 def _url(path: str) -> str:
@@ -437,7 +444,48 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
     )
 
 
-def build_current_page(calibration: dict, predictions: dict[int, list[dict]]) -> str:
+def _transfer_recommendation_section(gw: int, transfer_recommendations: dict[int, list[dict]]) -> Raw:
+    """Phase 13 Block 2.5. Silent (empty string) unless a PUBLISHED
+    transfer recommendation exists for THIS gameweek -- every other
+    status (no settled gameweek yet, an inconsistency skip) is a real,
+    expected, low-stakes internal state this newer capability can be in
+    for most of the season so far, not something worth surfacing to a
+    visitor as if it were a gap in the core prediction record above it
+    on this same page."""
+    lines = transfer_recommendations.get(gw)
+    if not lines:
+        return raw("")
+    rec = lines[-1]
+    if rec["status"] != "PUBLISHED":
+        return raw("")
+
+    r = rec["recommendation"]
+
+    def _player_row(p: dict) -> str:
+        return f"<li>{esc(p['name'])} ({esc(p['position'])}, {esc(p['team'])})</li>"
+
+    if not r["transfers_in"]:
+        move_html = "<p>No transfer recommended this gameweek.</p>"
+    else:
+        move_html = (
+            f'<div class="misses-grid"><div><h3>In</h3><ul>{"".join(_player_row(p) for p in r["transfers_in"])}</ul></div>'
+            f'<div><h3>Out</h3><ul>{"".join(_player_row(p) for p in r["transfers_out"])}</ul></div></div>'
+            f"<p>Free transfers available: {esc(r['free_transfers_available'])}. "
+            + (f"Hit taken: {esc(r['hit_points'])} points." if r["hit_points"] else "No hit taken.")
+            + "</p>"
+        )
+
+    caveats_html = "".join(f"<li>{esc(c)}</li>" for c in rec["caveats"])
+    return raw(
+        '<section class="notice notice-warning" aria-labelledby="transfer-heading">'
+        f'<h2 id="transfer-heading">Transfer recommendation (based on the real squad as of GW{esc(r["as_of_settled_gameweek"])})</h2>'
+        f"{move_html}"
+        f"<p><strong>Scope, disclosed:</strong></p><ul>{caveats_html}</ul>"
+        "</section>"
+    )
+
+
+def build_current_page(calibration: dict, predictions: dict[int, list[dict]], transfer_recommendations: dict[int, list[dict]] | None = None) -> str:
     record = _record_summary_fragment(calibration)
     caveat = _squad_recomputation_caveat()
     if not predictions:
@@ -460,12 +508,15 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]]) ->
         )
         picks_html = raw(f"{_squad_table(squad)}{commit_note}")
 
+    transfer_section = _transfer_recommendation_section(gw, transfer_recommendations or {})
+
     body = raw(
         f"{record}"
         f"{caveat}"
         f"<h1>This week: GW{gw}</h1>"
         f'<p class="deadline-note">Deadline: {esc(prediction["deadline_time_utc"])} UTC</p>'
         f"{picks_html}"
+        f"{transfer_section}"
     )
     return _page("This week", "This week's live FPL picks from APEX FPL.", "/current/", body, calibration["rebuilt_at_utc"])
 
@@ -759,10 +810,11 @@ def run() -> None:
 
     predictions = _all_predictions()
     results = _all_results()
+    transfer_recommendations = _all_transfer_recommendations()
     rebuilt_at_utc = calibration["rebuilt_at_utc"]
 
     _write(DOCS_ROOT / "index.html", build_homepage(calibration, predictions, results))
-    _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions))
+    _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions, transfer_recommendations))
     _write(DOCS_ROOT / "methodology" / "index.html", build_methodology_page(rebuilt_at_utc))
 
     missing = set(calibration["coverage"]["gameweeks_missing_prediction"] or [])

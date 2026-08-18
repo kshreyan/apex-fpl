@@ -202,14 +202,24 @@ def build_fixture_inputs_and_team_goals(target_fixtures: list[dict], team_model)
     return fixture_inputs, fixture_meta, team_expected_goals
 
 
-def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact: bool = True) -> dict:
-    def log(msg: str) -> None:
-        if verbose:
-            print(msg)
+def build_player_forecasts(target_gw: int, log=lambda msg: None) -> dict:
+    """The shared core both generate_recommendation() (squad selection)
+    and scripts/run_transfer_recommendation.py (evaluating transfer-in
+    candidates against the FULL live pool, not just a selected squad)
+    need: team model -> minutes/attacking allocation (cold-start or
+    in-season, whichever applies) -> Monte Carlo simulation. Extracted
+    from generate_recommendation() (Phase 13 Block 2.5) specifically so
+    the transfer script never re-forks this logic -- one place computes
+    "this gameweek's expected points for every live player," used by
+    both consumers.
 
-    log(f"=== Production recommendation: 2026/27 GW{target_gw} ===\n")
-
-    log("--- Fitting team model (live + 2024-25 fallback fixtures) ---")
+    Returns a dict: sim_results (apex_fpl.simulation.monte_carlo
+    PlayerSimResult per player_id, the full candidate pool, not a
+    selected squad), candidates_meta, fixture_meta,
+    teams_with_double_fixture, in_season_mode, settled_gw_count,
+    caveats, team_fixtures, cold_start_rows, total_sims.
+    """
+    log(f"--- Fitting team model (live + 2024-25 fallback fixtures) ---")
     team_fixtures = ld.build_team_model_fixtures(fallback_seasons=TEAM_MODEL_FALLBACK_SEASONS)
     team_model = ad.fit(team_fixtures)
     log(f"Team model fit on {len(team_fixtures)} fixtures (earliest {team_fixtures[0].date.date()}, latest {team_fixtures[-1].date.date()})")
@@ -309,13 +319,6 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     total_sims = len(next(iter(sim_results.values())).samples) if sim_results else 0
     log(f"Simulations run: {total_sims}\n")
 
-    log("--- Selecting squad (EV optimizer, the confirmed champion) ---")
-    candidates = [sq.PlayerCandidate(pid, m["position"], m["team"], m["price"], sim_results[pid].mean_points, m["availability_probability"]) for pid, m in candidates_meta.items() if pid in sim_results]
-    squad = sq.select_squad(candidates, budget=sq.BUDGET)
-    xi = sq.select_starting_xi(squad)
-    captain_haul_probability = float((sim_results[xi.captain.player_id].samples >= CAPTAIN_HAUL_THRESHOLD).mean())
-    log(f"Captain: {candidates_meta[xi.captain.player_id]['name']} (EP={xi.captain.expected_points:.2f}, P({CAPTAIN_HAUL_THRESHOLD}+)={captain_haul_probability:.2f})\n")
-
     if in_season_mode:
         caveats = [
             f"Minutes and attacking allocation use the Phase 4b/5 champion models (exponential_decay, calibrated; shrinkage_share), fed by {settled_gw_count} settled gameweek(s) of history reconstructed from this pipeline's own raw snapshots (apex_fpl.serving.gameweek_history) -- not the historical Vaastav archive.",
@@ -340,6 +343,46 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
             "goal-involvement rate to one specific fixture without a fuller joint model than this "
             "baseline simulator implements."
         )
+
+    return {
+        "sim_results": sim_results,
+        "candidates_meta": candidates_meta,
+        "fixture_meta": fixture_meta,
+        "teams_with_double_fixture": teams_with_double_fixture,
+        "in_season_mode": in_season_mode,
+        "settled_gw_count": settled_gw_count,
+        "caveats": caveats,
+        "team_fixtures": team_fixtures,
+        "cold_start_rows": cold_start_rows,
+        "total_sims": total_sims,
+    }
+
+
+def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact: bool = True) -> dict:
+    def log(msg: str) -> None:
+        if verbose:
+            print(msg)
+
+    log(f"=== Production recommendation: 2026/27 GW{target_gw} ===\n")
+
+    forecasts = build_player_forecasts(target_gw, log=log)
+    sim_results = forecasts["sim_results"]
+    candidates_meta = forecasts["candidates_meta"]
+    fixture_meta = forecasts["fixture_meta"]
+    teams_with_double_fixture = forecasts["teams_with_double_fixture"]
+    in_season_mode = forecasts["in_season_mode"]
+    settled_gw_count = forecasts["settled_gw_count"]
+    caveats = forecasts["caveats"]
+    team_fixtures = forecasts["team_fixtures"]
+    cold_start_rows = forecasts["cold_start_rows"]
+    total_sims = forecasts["total_sims"]
+
+    log("--- Selecting squad (EV optimizer, the confirmed champion) ---")
+    candidates = [sq.PlayerCandidate(pid, m["position"], m["team"], m["price"], sim_results[pid].mean_points, m["availability_probability"]) for pid, m in candidates_meta.items() if pid in sim_results]
+    squad = sq.select_squad(candidates, budget=sq.BUDGET)
+    xi = sq.select_starting_xi(squad)
+    captain_haul_probability = float((sim_results[xi.captain.player_id].samples >= CAPTAIN_HAUL_THRESHOLD).mean())
+    log(f"Captain: {candidates_meta[xi.captain.player_id]['name']} (EP={xi.captain.expected_points:.2f}, P({CAPTAIN_HAUL_THRESHOLD}+)={captain_haul_probability:.2f})\n")
 
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     recommendation = {

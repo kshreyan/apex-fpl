@@ -29,6 +29,7 @@ def repo(tmp_path, monkeypatch):
 
     monkeypatch.setattr(build_site, "REPO_ROOT", root)
     monkeypatch.setattr(build_site, "PREDICTIONS_DIR", root / "data" / "predictions")
+    monkeypatch.setattr(build_site, "TRANSFER_RECOMMENDATIONS_DIR", root / "data" / "transfer_recommendations")
     monkeypatch.setattr(build_site, "RESULTS_DIR", root / "data" / "results")
     monkeypatch.setattr(build_site, "CALIBRATION_PATH", root / "data" / "calibration.json")
     monkeypatch.setattr(build_site, "DOCS_ROOT", root / "docs")
@@ -263,3 +264,66 @@ def test_biggest_misses_section_renders_on_homepage(repo):
     home = (repo / "docs" / "index.html").read_text()
     assert "Biggest misses this season" in home
     assert "GW3" in home
+
+
+def _transfer_recommendation(gw, status="PUBLISHED", transfers_in=None, transfers_out=None):
+    body = {
+        "record_id": "t1", "supersedes": None, "gameweek": gw, "status": status,
+        "entry_id": 4432389, "horizon": 1,
+    }
+    if status != "PUBLISHED":
+        body["recommendation"] = None
+        return body
+    body["recommendation"] = {
+        "as_of_settled_gameweek": gw - 1,
+        "free_transfers_available": 1,
+        "transfers_in": transfers_in if transfers_in is not None else [{"player_id": "9", "name": "New Guy", "position": "MID", "team": "Chelsea"}],
+        "transfers_out": transfers_out if transfers_out is not None else [{"player_id": "1", "name": "Player One", "position": "MID", "team": "Arsenal"}],
+        "paid_transfers": 0, "hit_points": 0.0, "bank_after": 0.3,
+    }
+    body["caveats"] = ["horizon=1 (myopic), not the stronger validated multi-gameweek policy."]
+    return body
+
+
+def test_current_page_renders_a_published_transfer_recommendation(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw02.jsonl", [_prediction(2)])
+    _write_ledger(repo / "data" / "transfer_recommendations" / "gw02.jsonl", [_transfer_recommendation(2)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw2 prediction + transfer rec")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Transfer recommendation" in current
+    assert "New Guy" in current
+    assert "Player One" in current
+    assert "horizon=1" in current
+
+
+def test_current_page_shows_nothing_when_transfer_recommendation_not_published(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _write_ledger(repo / "data" / "transfer_recommendations" / "gw01.jsonl", [_transfer_recommendation(1, status="NO_SETTLED_GAMEWEEK_YET")])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction, no settled transfer state")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Transfer recommendation" not in current
+
+
+def test_current_page_shows_nothing_when_no_transfer_ledger_exists_at_all(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction only")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Transfer recommendation" not in current

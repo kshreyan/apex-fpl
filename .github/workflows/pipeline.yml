@@ -120,6 +120,26 @@ jobs:
             exit "$code"
           fi
 
+      - name: Run predict_transfers.py
+        id: predict-transfers
+        # Deliberately never blocks the pipeline: this is a newer,
+        # structurally separate capability (Phase 13 Block 2.5) from the
+        # core squad prediction above, which has already succeeded and
+        # committed by this point. A bug here must not cost a real
+        # deadline for the thing this whole project's credibility rests
+        # on -- logged loudly as a warning annotation on failure, never
+        # propagated as a job failure.
+        if: steps.gate.outputs.should_run == 'true'
+        run: |
+          set +e
+          python -m pipeline.predict_transfers
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::warning title=Transfer recommendation failed::predict_transfers.py exited $code -- the core squad prediction above already succeeded and is unaffected. See the step log."
+          fi
+          exit 0
+
       - name: Open an issue for a missed deadline
         # Exit 3 leaves the run green -- a log annotation on a green run
         # is functionally silent, and this is the worst case the daily
@@ -147,7 +167,7 @@ jobs:
         id: commit-predict
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          git add data/predictions data/raw
+          git add data/predictions data/transfer_recommendations data/raw
           if git diff --cached --quiet; then
             echo "No new prediction this run -- skipping commit."
           else

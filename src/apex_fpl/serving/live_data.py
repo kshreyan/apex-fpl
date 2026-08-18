@@ -148,11 +148,21 @@ def load_finished_fixtures() -> list[Fixture]:
     """Real 2026/27 fixtures with a final score, converted to the SAME
     Fixture dataclass every team-model fit() call already expects.
     Expected to be EMPTY before GW1 finishes — that's the real situation
-    this module exists to handle (see build_team_model_fixtures)."""
+    this module exists to handle (see build_team_model_fixtures).
+
+    Deduplicates by fixture_id via _latest_by_key like every other loader
+    in this module -- found missing here (Phase 13 Block 0) while
+    investigating a real, live "20 teams have a double gameweek in GW1"
+    bug: fixtures.csv is append-only across daily Silver rebuilds, so a
+    fixture already has multiple rows (one per snapshot) well before its
+    OWN kickoff. Without deduping, every downstream caller (this one and
+    load_target_gw_fixtures) silently multiplies every fixture by however
+    many snapshots have run -- confirmed directly against real data:
+    2 rows already for each of GW1's 10 real fixtures."""
     clubs = load_clubs()
-    rows = _read_csv("fixtures.csv")
+    rows = _latest_by_key(_read_csv("fixtures.csv"), "fixture_id")
     out = []
-    for r in rows:
+    for r in rows.values():
         if r["finished"] != "True":
             continue
         out.append(Fixture(
@@ -164,10 +174,12 @@ def load_finished_fixtures() -> list[Fixture]:
 
 
 def load_target_gw_fixtures(target_gw: int) -> list[dict]:
+    """See load_finished_fixtures's docstring for why the _latest_by_key
+    dedup here is load-bearing, not defensive."""
     clubs = load_clubs()
-    rows = _read_csv("fixtures.csv")
+    rows = _latest_by_key(_read_csv("fixtures.csv"), "fixture_id")
     out = []
-    for r in rows:
+    for r in rows.values():
         if int(r["event_id"]) != target_gw:
             continue
         out.append({

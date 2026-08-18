@@ -103,17 +103,44 @@ def test_player_availability_probability_priority_order(status, this_round, next
     assert ld.player_availability_probability(status, this_round, next_round) == expected
 
 
+_FIXTURES_FIELDS = ["fixture_id", "event_id", "team_h", "team_a", "kickoff_time_utc", "finished", "team_h_score", "team_a_score", "retrieved_at"]
+
+
 def test_load_finished_fixtures_filters_to_finished_only(canonical_dir):
     _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [
         {"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}, {"club_id": "2", "name": "Chelsea", "retrieved_at": "t"},
     ])
-    _write_csv(canonical_dir / "fixtures.csv", ["fixture_id", "event_id", "team_h", "team_a", "kickoff_time_utc", "finished", "team_h_score", "team_a_score"], [
-        {"fixture_id": "1", "event_id": "1", "team_h": "1", "team_a": "2", "kickoff_time_utc": "2026-08-21T19:00:00Z", "finished": "True", "team_h_score": "2", "team_a_score": "1"},
-        {"fixture_id": "2", "event_id": "2", "team_h": "2", "team_a": "1", "kickoff_time_utc": "2026-08-28T19:00:00Z", "finished": "False", "team_h_score": "", "team_a_score": ""},
+    _write_csv(canonical_dir / "fixtures.csv", _FIXTURES_FIELDS, [
+        {"fixture_id": "1", "event_id": "1", "team_h": "1", "team_a": "2", "kickoff_time_utc": "2026-08-21T19:00:00Z", "finished": "True", "team_h_score": "2", "team_a_score": "1", "retrieved_at": "t"},
+        {"fixture_id": "2", "event_id": "2", "team_h": "2", "team_a": "1", "kickoff_time_utc": "2026-08-28T19:00:00Z", "finished": "False", "team_h_score": "", "team_a_score": "", "retrieved_at": "t"},
     ])
     finished = ld.load_finished_fixtures()
     assert len(finished) == 1
     assert finished[0].home_team == "Arsenal" and finished[0].away_score == 1
+
+
+def test_load_finished_fixtures_deduplicates_repeated_snapshots(canonical_dir):
+    """Real bug, found live (Phase 13 Block 0): fixtures.csv is
+    append-only across daily Silver rebuilds, so a single real fixture
+    already has multiple rows (one per snapshot) well before its own
+    kickoff. Undeduplicated, a fixture appearing in N snapshots was
+    silently counted as N fixtures downstream -- confirmed live as a
+    false "double gameweek" for every GW1 team after a handful of
+    ordinary daily/dry-run pipeline invocations."""
+    _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [
+        {"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}, {"club_id": "2", "name": "Chelsea", "retrieved_at": "t"},
+    ])
+    _write_csv(canonical_dir / "fixtures.csv", _FIXTURES_FIELDS, [
+        # same fixture_id, three snapshots -- must collapse to exactly one
+        {"fixture_id": "1", "event_id": "1", "team_h": "1", "team_a": "2", "kickoff_time_utc": "2026-08-21T19:00:00Z", "finished": "True", "team_h_score": "1", "team_a_score": "1", "retrieved_at": "2026-08-16T00:00:00+00:00"},
+        {"fixture_id": "1", "event_id": "1", "team_h": "1", "team_a": "2", "kickoff_time_utc": "2026-08-21T19:00:00Z", "finished": "True", "team_h_score": "2", "team_a_score": "1", "retrieved_at": "2026-08-17T00:00:00+00:00"},
+        {"fixture_id": "1", "event_id": "1", "team_h": "1", "team_a": "2", "kickoff_time_utc": "2026-08-21T19:00:00Z", "finished": "True", "team_h_score": "3", "team_a_score": "1", "retrieved_at": "2026-08-15T00:00:00+00:00"},
+    ])
+    finished = ld.load_finished_fixtures()
+    target = ld.load_target_gw_fixtures(1)
+    assert len(finished) == 1
+    assert finished[0].home_score == 2  # the latest snapshot's score (2026-08-17), not the first or last-in-file
+    assert len(target) == 1
 
 
 def test_load_gameweeks_parses_deadlines_and_flags(canonical_dir):

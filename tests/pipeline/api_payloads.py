@@ -34,7 +34,9 @@ def _default_element_types():
 
 
 def make_element(id_, team, element_type, web_name="Player", now_cost=50, selected_by_percent="10.0", status="a", event_points=0,
-                  chance_of_playing_this_round=None, chance_of_playing_next_round=None):
+                  chance_of_playing_this_round=None, chance_of_playing_next_round=None,
+                  clearances_blocks_interceptions=0, recoveries=0, tackles=0,
+                  defensive_contribution=0, defensive_contribution_per_90=0.0):
     return {
         "id": id_, "web_name": web_name, "team": team, "element_type": element_type,
         "status": status, "now_cost": now_cost, "selected_by_percent": selected_by_percent, "event_points": event_points,
@@ -42,6 +44,11 @@ def make_element(id_, team, element_type, web_name="Player", now_cost=50, select
         # See apex_fpl.serving.live_data.player_availability_probability.
         "chance_of_playing_this_round": chance_of_playing_this_round,
         "chance_of_playing_next_round": chance_of_playing_next_round,
+        # DefCon raw stats (Phase 13 Block 1.4) -- captured, not yet modeled.
+        "clearances_blocks_interceptions": clearances_blocks_interceptions,
+        "recoveries": recoveries, "tackles": tackles,
+        "defensive_contribution": defensive_contribution,
+        "defensive_contribution_per_90": defensive_contribution_per_90,
     }
 
 

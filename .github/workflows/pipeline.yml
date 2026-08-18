@@ -17,9 +17,23 @@ name: FPL Pipeline
 # workflow_dispatch is required by this project's own non-negotiables,
 # not just convenience -- it's how Gate verification and RUNBOOK-driven
 # manual recovery both work.
+#
+# Second schedule, hourly (Phase 13 Block 1.6): press conferences and
+# late fitness tests land inside the final 24h before a deadline, and a
+# once-daily check can be stale by exactly the window that matters most.
+# Running the full pipeline (deps, test suite, model) every hour, all
+# day, every day, purely on the chance a deadline is close would be
+# wasteful and would flood the commit history -- so this tick starts
+# with pipeline/should_run_now.py, a single cheap probe fetch, and only
+# proceeds to the expensive steps if a deadline is genuinely within 24h.
+# The daily anchor tick (identified by github.event.schedule below) and
+# manual dispatch always run in full, unconditionally -- they cover
+# settlement detection and calibration freshness, which don't depend on
+# deadline proximity at all.
 "on":
   schedule:
     - cron: "23 6 * * *"
+    - cron: "37 * * * *"
   workflow_dispatch: {}
 
 # Least privilege at the workflow level; each job below grants itself
@@ -70,15 +84,29 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      - name: Determine whether this tick runs the full pipeline
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ github.event.schedule }}" == "23 6 * * *" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Always running: manual dispatch or the daily anchor schedule."
+          else
+            result=$(python -m pipeline.should_run_now)
+            echo "should_run=$result" >> "$GITHUB_OUTPUT"
+            echo "Hourly tick outside the daily anchor -- pipeline.should_run_now says: $result"
+          fi
+
       - name: Run test suite
         # A regression here must block the run before it ever touches
         # live data or publishes anything -- this is the "fail loudly,
         # never publish a partial or fallback prediction" rule applied
         # one step earlier than the pipeline itself.
+        if: steps.gate.outputs.should_run == 'true'
         run: python -m pytest -q
 
       - name: Run predict.py
         id: predict
+        if: steps.gate.outputs.should_run == 'true'
         run: |
           set +e
           python -m pipeline.predict
@@ -117,6 +145,7 @@ jobs:
 
       - name: Commit and push the prediction
         id: commit-predict
+        if: steps.gate.outputs.should_run == 'true'
         run: |
           git add data/predictions data/raw
           if git diff --cached --quiet; then
@@ -137,16 +166,20 @@ jobs:
           fi
 
       - name: Run score.py
+        if: steps.gate.outputs.should_run == 'true'
         run: python -m pipeline.score
 
       - name: Rebuild data/calibration.json
+        if: steps.gate.outputs.should_run == 'true'
         run: python -m pipeline.metrics
 
       - name: Rebuild the site
+        if: steps.gate.outputs.should_run == 'true'
         run: python -m pipeline.build_site
 
       - name: Commit and push scoring + site updates
         id: commit
+        if: steps.gate.outputs.should_run == 'true'
         run: |
           git add data docs
           if git diff --cached --quiet; then
@@ -168,6 +201,7 @@ jobs:
           fi
 
       - name: Upload the built site
+        if: steps.gate.outputs.should_run == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: docs

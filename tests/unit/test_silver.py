@@ -25,7 +25,9 @@ SAMPLE_BOOTSTRAP = {
          "chance_of_playing_next_round": None, "now_cost": 60, "selected_by_percent": "31.2",
          "event_points": 0, "total_points": 162, "minutes": 3330, "goals_scored": 0,
          "assists": 0, "clean_sheets": 19, "goals_conceded": 26, "bonus": 11, "bps": 633,
-         "saves": 60, "defensive_contribution": 0, "expected_goals": "0.00",
+         "saves": 60, "defensive_contribution": 12, "defensive_contribution_per_90": 0.32,
+         "clearances_blocks_interceptions": 8, "recoveries": 3, "tackles": 1,
+         "expected_goals": "0.00",
          "expected_assists": "0.07", "form": "0.0", "points_per_game": "4.4"},
     ],
 }
@@ -62,6 +64,19 @@ def test_parse_bootstrap_stats_row_carries_period_ambiguity_flag():
     stats = tables["player_stats"][0]
     assert stats["total_points"] == 162
     assert stats["stat_period_note"] == schema.PLAYER_STATS_PERIOD_NOTE
+
+
+def test_parse_bootstrap_captures_defcon_raw_stats():
+    """Phase 13 Block 1.4: DefCon raw stats arrive in the live payload
+    and must actually be captured into player_stats, not just declared
+    in schema.PLAYER_STATS_FIELDS."""
+    tables = silver.parse_bootstrap(SAMPLE_BOOTSTRAP, SAMPLE_META, "snap1.json")
+    stats = tables["player_stats"][0]
+    assert stats["defensive_contribution"] == 12
+    assert stats["defensive_contribution_per_90"] == 0.32
+    assert stats["clearances_blocks_interceptions"] == 8
+    assert stats["recoveries"] == 3
+    assert stats["tackles"] == 1
 
 
 def test_parse_fixtures_row_shape():

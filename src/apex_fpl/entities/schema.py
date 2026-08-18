@@ -64,7 +64,12 @@ PLAYERS_FIELDS = [
 PLAYER_STATS_FIELDS = [
     "player_id", "event_points", "total_points", "minutes",
     "goals_scored", "assists", "clean_sheets", "goals_conceded",
-    "bonus", "bps", "saves", "defensive_contribution",
+    "bonus", "bps", "saves",
+    # DefCon (Defensive Contribution, live from 2025/26) raw stats --
+    # defensive_contribution was already here; the other 4 were captured
+    # in the live payload but not this table until Phase 13 Block 1.4.
+    "defensive_contribution", "defensive_contribution_per_90",
+    "clearances_blocks_interceptions", "recoveries", "tackles",
     "expected_goals", "expected_assists",
     "form", "points_per_game",
     "stat_period_note",

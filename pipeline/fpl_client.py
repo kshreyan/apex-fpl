@@ -67,6 +67,15 @@ BOOTSTRAP_LIST_FIELD_SPECS: dict[str, dict[str, type | tuple[type, ...]]] = {
         # the null-handling this schema entry protects.
         "chance_of_playing_this_round": _NULLABLE_INT,
         "chance_of_playing_next_round": _NULLABLE_INT,
+        # Defensive Contribution (DefCon, live from 2025/26) raw stats --
+        # captured now, not yet modeled anywhere (Phase 13 Block 1.4).
+        # Types confirmed against real live data (2026-08-16 snapshot):
+        # all int except the _per_90 rate, which is a float.
+        "clearances_blocks_interceptions": int,
+        "recoveries": int,
+        "tackles": int,
+        "defensive_contribution": int,
+        "defensive_contribution_per_90": float,
     },
     "element_types": {
         "id": int, "squad_select": int, "squad_min_play": int, "squad_max_play": int,

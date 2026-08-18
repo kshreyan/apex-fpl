@@ -27,20 +27,38 @@ historical season). This script instead:
   August 2026) is the freshest available prior — meaningfully worse
   than the fresher prior this mechanism was designed to use once a more
   complete archive exists.
-- **Minutes**: uses the Phase 12 cold-start model
+- **Minutes and attacking allocation, GW1-6**: use the cold-start models
   (`apex_fpl.models.minutes.cold_start`, real-data-validated: beats a
   flat baseline on held-out log loss in all 4 leave-one-season-out
-  folds checked) rather than the champion `exponential_decay` model,
-  which needs history this gameweek structurally cannot have.
-- **Attacking allocation**: NO validated cold-start equivalent exists
-  yet (would need reliable player-ID reconciliation between the live
-  API and the historical archive, not attempted this phase — an
-  explicit, stated gap, not a silent guess). Falls back to a simple,
-  UNVALIDATED price-weighted split within each team's outfield
-  positions — real signal (price correlates with attacking reputation)
-  but not tested against real data the way the minutes cold-start model
-  was. Every recommendation this script produces is tagged with this
-  caveat so it's never silently presented as equally trustworthy.
+  folds checked; and an UNVALIDATED price-weighted split for attacking
+  allocation, since no validated cold-start equivalent for it exists —
+  real signal, price correlates with attacking reputation, but not
+  tested against real data the way the minutes cold-start model was).
+  Both champion models (`exponential_decay`, `shrinkage_share`)
+  structurally need real per-gameweek current-season history neither
+  can have this early.
+- **Minutes and attacking allocation, GW7+**: switches automatically to
+  the Phase 4b/5 champion models
+  (`apex_fpl.models.minutes.challengers.exponential_decay`, isotonic-
+  calibrated per Phase 5; `apex_fpl.models.attacking.challengers.
+  shrinkage_share`), fed by real per-gameweek history reconstructed from
+  this pipeline's OWN captured raw snapshots
+  (`apex_fpl.serving.gameweek_history` — no `element-summary` API calls,
+  no historical-archive cross-reconciliation; diffs cumulative totals at
+  consecutive settled-gameweek boundaries instead). The GW7 threshold
+  (`IN_SEASON_TRANSITION_MIN_SETTLED_GWS = 6` prior settled gameweeks)
+  matches Phase 4b's own tournament evidence boundary — the earliest
+  gameweek that tournament had ANY real evidence for either champion —
+  not an independently re-validated optimal switchover point for this
+  specific handoff; that remains real, undone future work. If a
+  pipeline outage leaves a real gap in the reconstructed history, the
+  affected gameweek(s) are skipped rather than guessed at (see
+  `gameweek_history`'s own docstring), so the transition can be delayed
+  past GW7 in practice, or an individual player can fall back to a
+  model's own uninformative-prior behavior even once `in_season_mode`
+  is otherwise active. Every recommendation is tagged with which mode
+  actually ran (`in_season_mode`, `settled_gameweeks_reconstructed` in
+  the output) rather than presenting either path as the silent default.
 
 **Double gameweeks: a stated, partial fix, not a full one.** Properly
 simulating two independent fixtures for one player needs the model's own
@@ -76,11 +94,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from apex_fpl.backtesting import vaastav_loader as vl
+from apex_fpl.calibration import production_calibrators as prod_cal
+from apex_fpl.models.attacking import challengers as attacking_challengers
+from apex_fpl.models.attacking import proportional as prop
+from apex_fpl.models.minutes import challengers as minutes_challengers
 from apex_fpl.models.minutes import cold_start as cs
 from apex_fpl.models.teams import attack_defense as ad
 from apex_fpl.models.teams import scoreline as sl
 from apex_fpl.optimization import squad as sq
 from apex_fpl.rules import scoring
+from apex_fpl.serving import gameweek_history as gwh
 from apex_fpl.serving import live_data as ld
 from apex_fpl.simulation import monte_carlo as mc
 
@@ -89,6 +112,34 @@ ARTIFACT_DIR = REPO_ROOT / "artifacts" / "production_recommendations"
 COLD_START_MINUTES_TRAIN_SEASONS = ["2020-21", "2022-23", "2023-24", "2024-25"]
 TEAM_MODEL_FALLBACK_SEASONS = ("2024-25",)
 CAPTAIN_HAUL_THRESHOLD = 6  # "haul" = captain (undoubled) points >= this
+
+# In-season champion config -- must match artifacts/model_registry.json's
+# minutes_model/attacking_allocation_model champion entries exactly; not
+# re-derived here, just referenced (Phase 4b/5's own validated values).
+MINUTES_HALFLIFE = 3.0
+ATTACKING_ALPHA = 10.0
+ATTACKING_LOOKBACK = 15
+
+# The earliest gameweek Phase 4b's own tournament had ANY real evidence
+# for these champions: GW7, the first gameweek where even the simplest
+# candidate (flat_lookback6) has a full 6-gameweek window
+# (docs/phase4b_tournament_report.md's "Setup"). Using 6 PRIOR settled
+# gameweeks as the transition threshold matches that evidence boundary
+# exactly -- it is NOT an independently re-validated optimal switchover
+# point for this specific cold-start-to-in-season transition (that is
+# real, undone future work; see the promotion schedule's minutes item).
+# Counted as "gameweeks this pipeline actually reconstructed a usable
+# settlement snapshot for" (apex_fpl.serving.gameweek_history), not just
+# target_gw - 1, since a pipeline outage can leave real gaps.
+IN_SEASON_TRANSITION_MIN_SETTLED_GWS = 6
+
+
+def usable_settled_gameweek_count(target_gw: int) -> int:
+    # raw_root passed explicitly (not left to gwh.find_settlement_snapshots's
+    # own default parameter) so a test monkeypatching gwh.RAW_DATA_ROOT is
+    # actually picked up -- a default arg is bound at gwh's import time, before
+    # any monkeypatch runs.
+    return len(gwh.find_settlement_snapshots(max_gw=target_gw - 1, raw_root=gwh.RAW_DATA_ROOT))
 
 
 def _hash_file(path: Path) -> str:
@@ -167,6 +218,18 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     players = ld.load_players()
     log(f"{len(players)} players loaded\n")
 
+    settled_gw_count = usable_settled_gameweek_count(target_gw)
+    in_season_mode = settled_gw_count >= IN_SEASON_TRANSITION_MIN_SETTLED_GWS
+    minutes_history: dict[str, list[int]] = {}
+    goals_assists_history: dict[str, list[tuple[int, int]]] = {}
+    if in_season_mode:
+        log(f"--- {settled_gw_count} settled gameweek(s) reconstructed -- using in-season champion models (exponential_decay minutes, shrinkage attacking) ---\n")
+        deltas = gwh.reconstruct_player_gameweek_deltas(max_gw=target_gw - 1, raw_root=gwh.RAW_DATA_ROOT)
+        minutes_history = gwh.minutes_history_by_code(deltas)
+        goals_assists_history = gwh.goals_assists_history_by_code(deltas)
+    else:
+        log(f"--- Only {settled_gw_count} settled gameweek(s) reconstructed (< {IN_SEASON_TRANSITION_MIN_SETTLED_GWS}) -- staying on cold-start models ---\n")
+
     # team_expected_goals sums ALL of a team's fixtures this gameweek (a double-gameweek
     # team plays twice) -- see module docstring's "Double gameweeks" section for why this
     # is a stated approximation (one combined match), not full independent-fixture modeling.
@@ -176,33 +239,52 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     if teams_with_double_fixture:
         log(f"Double gameweek detected for: {', '.join(teams_with_double_fixture)} — combining into one summed-goals match (see module docstring)\n")
 
-    # price-weighted attacking share within each (team, outfield-position) group — see module
-    # docstring's "Attacking allocation" section for why this is an explicit, unvalidated fallback.
-    by_team_pos: dict[tuple[str, str], list[str]] = {}
-    for pid, meta in players.items():
-        if meta["team"] not in team_expected_goals or meta["position"] == "GK":
-            continue
-        by_team_pos.setdefault((meta["team"], meta["position"]), []).append(pid)
-    price_weight: dict[str, float] = {}
-    for (team, pos), ids in by_team_pos.items():
-        total_price = sum(players[pid]["price"] for pid in ids)
-        for pid in ids:
-            price_weight[pid] = players[pid]["price"] / total_price if total_price > 0 else 1.0 / len(ids)
+    if in_season_mode:
+        # Grouped by team only, ALL positions included (matches the validated
+        # apex_fpl.backtesting.replay.run_gameweek pattern exactly -- goalkeepers
+        # are not specially zeroed, shrinkage's own alpha naturally gives them a
+        # near-zero share from their real near-zero observed goal involvement).
+        team_player_history: dict[str, dict[str, list[tuple[int, int]]]] = {}
+        for pid, meta in players.items():
+            if meta["team"] not in team_expected_goals:
+                continue
+            hist = goals_assists_history.get(meta["code"], [])[-ATTACKING_LOOKBACK:]
+            team_player_history.setdefault(meta["team"], {})[pid] = hist
+        shares_by_team = {team: attacking_challengers.shrinkage_share(hist, alpha=ATTACKING_ALPHA) for team, hist in team_player_history.items()}
+    else:
+        # price-weighted attacking share within each (team, outfield-position) group — see module
+        # docstring's "Attacking allocation" section for why this is an explicit, unvalidated fallback.
+        by_team_pos: dict[tuple[str, str], list[str]] = {}
+        for pid, meta in players.items():
+            if meta["team"] not in team_expected_goals or meta["position"] == "GK":
+                continue
+            by_team_pos.setdefault((meta["team"], meta["position"]), []).append(pid)
+        price_weight: dict[str, float] = {}
+        for (team, pos), ids in by_team_pos.items():
+            total_price = sum(players[pid]["price"] for pid in ids)
+            for pid in ids:
+                price_weight[pid] = players[pid]["price"] / total_price if total_price > 0 else 1.0 / len(ids)
 
     players_for_sim, candidates_meta = [], {}
     for pid, meta in players.items():
         team = meta["team"]
         if team not in team_expected_goals:
             continue
-        mfc = minutes_model.predict(meta["price"])
         team_exp_goals_total = sum(team_expected_goals[team])
 
-        if meta["position"] == "GK":
-            exp_goals, exp_assists = 0.0, 0.0
+        if in_season_mode:
+            mfc = minutes_challengers.exponential_decay(minutes_history.get(meta["code"], []), half_life_matches=MINUTES_HALFLIFE)
+            mfc = prod_cal.apply_minutes_calibration(mfc)
+            share = shares_by_team.get(team, {}).get(pid, prop.AttackingShare(0.0, 0.0))
+            exp_goals, exp_assists = prop.allocate(team_exp_goals_total, {pid: share})[pid]
         else:
-            share = price_weight.get(pid, 0.0) * 0.7  # ~70% of a team's expected goals distributed among outfielders proportional to price; the rest (own goals, unallocated) isn't assigned to any single player, matching the conservative spirit of the validated shrinkage model's own smoothing
-            exp_goals = team_exp_goals_total * share
-            exp_assists = team_exp_goals_total * share * 0.8  # assists are slightly less concentrated than goals in real data (spec Part XI); a rough, stated proxy, not fit from data
+            mfc = minutes_model.predict(meta["price"])
+            if meta["position"] == "GK":
+                exp_goals, exp_assists = 0.0, 0.0
+            else:
+                share = price_weight.get(pid, 0.0) * 0.7  # ~70% of a team's expected goals distributed among outfielders proportional to price; the rest (own goals, unallocated) isn't assigned to any single player, matching the conservative spirit of the validated shrinkage model's own smoothing
+                exp_goals = team_exp_goals_total * share
+                exp_assists = team_exp_goals_total * share * 0.8  # assists are slightly less concentrated than goals in real data (spec Part XI); a rough, stated proxy, not fit from data
 
         players_for_sim.append(mc.PlayerInput(player_id=pid, team=team, position=meta["position"], minutes_forecast=mfc, expected_goals=exp_goals, expected_assists=exp_assists))
         candidates_meta[pid] = {"name": meta["name"], "team": team, "position": meta["position"], "price": meta["price"], "availability_probability": meta["availability_probability"]}
@@ -222,11 +304,20 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     captain_haul_probability = float((sim_results[xi.captain.player_id].samples >= CAPTAIN_HAUL_THRESHOLD).mean())
     log(f"Captain: {candidates_meta[xi.captain.player_id]['name']} (EP={xi.captain.expected_points:.2f}, P({CAPTAIN_HAUL_THRESHOLD}+)={captain_haul_probability:.2f})\n")
 
-    caveats = [
-        "Minutes model is a validated cold-start fallback (beats a flat baseline in real leave-one-season-out testing), not the champion model.",
-        "Attacking allocation is an UNVALIDATED price-weighted heuristic, not the champion shrinkage model -- treat with real skepticism.",
-        "Team model's historical fallback uses 2024-25 (the archive's most recent season) -- 2025/26 is not yet in this project's historical archive, so this prior is staler than the mechanism was designed for.",
-    ]
+    if in_season_mode:
+        caveats = [
+            f"Minutes and attacking allocation use the Phase 4b/5 champion models (exponential_decay, calibrated; shrinkage_share), fed by {settled_gw_count} settled gameweek(s) of history reconstructed from this pipeline's own raw snapshots (apex_fpl.serving.gameweek_history) -- not the historical Vaastav archive.",
+            f"The GW{IN_SEASON_TRANSITION_MIN_SETTLED_GWS + 1} switchover point matches Phase 4b's own tournament evidence boundary, not an independently re-validated optimal transition for this specific cold-start handoff -- a dedicated replay study of the exact best switchover point has not been done.",
+            "Reconstructed history can have real gaps (a pipeline outage skips the affected gameweek(s) rather than guessing) -- individual players with little or no reconstructed history fall back to each model's own uninformative-prior behavior, not a crash.",
+        ]
+    else:
+        caveats = [
+            "Minutes model is a validated cold-start fallback (beats a flat baseline in real leave-one-season-out testing), not the champion model.",
+            "Attacking allocation is an UNVALIDATED price-weighted heuristic, not the champion shrinkage model -- treat with real skepticism.",
+        ]
+    caveats.append(
+        "Team model's historical fallback uses 2024-25 (the archive's most recent season) -- 2025/26 is not yet in this project's historical archive, so this prior is staler than the mechanism was designed for."
+    )
     if teams_with_double_fixture:
         caveats.append(
             f"Double gameweek this week for: {', '.join(teams_with_double_fixture)}. "
@@ -242,11 +333,21 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
         "generated_at": generated_at,
         "model_config": {
             "team_model": f"attack_defense, fit on {len(team_fixtures)} fixtures (live + {TEAM_MODEL_FALLBACK_SEASONS} fallback)",
-            "minutes_model": "COLD-START price-based isotonic model (apex_fpl.models.minutes.cold_start), NOT the champion exponential_decay model -- no current-season history exists yet",
-            "attacking_model": "COLD-START price-weighted split within team/position -- UNVALIDATED fallback, NOT the champion shrinkage_share model",
+            "minutes_model": (
+                f"IN-SEASON champion: exponential_decay (half_life={MINUTES_HALFLIFE}, isotonic-calibrated per Phase 5), fed by {settled_gw_count} reconstructed settled gameweek(s)"
+                if in_season_mode else
+                "COLD-START price-based isotonic model (apex_fpl.models.minutes.cold_start), NOT the champion exponential_decay model -- no current-season history exists yet"
+            ),
+            "attacking_model": (
+                f"IN-SEASON champion: shrinkage_share (alpha={ATTACKING_ALPHA}, lookback={ATTACKING_LOOKBACK}), fed by {settled_gw_count} reconstructed settled gameweek(s)"
+                if in_season_mode else
+                "COLD-START price-weighted split within team/position -- UNVALIDATED fallback, NOT the champion shrinkage_share model"
+            ),
             "squad_optimizer": "select_squad (EV MILP) -- the confirmed champion per artifacts/model_registry.json",
             "simulations_run": total_sims,
         },
+        "in_season_mode": in_season_mode,
+        "settled_gameweeks_reconstructed": settled_gw_count,
         "caveats": caveats,
         "teams_with_double_fixture": teams_with_double_fixture,
         "training_data_fingerprint": {

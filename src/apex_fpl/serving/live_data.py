@@ -107,10 +107,14 @@ def player_availability_probability(status: str, chance_this_round: int | None, 
 
 def load_players() -> dict[str, dict]:
     """player_id -> {name, position, team, price, selected_by_percent,
-    status, availability_probability} using the LATEST snapshot's
+    status, availability_probability, code} using the LATEST snapshot's
     players.csv row (team/position/price can legitimately change week to
     week — price via transfers, position/team far more rarely, e.g. a
-    very rare mid-season reclassification)."""
+    very rare mid-season reclassification). `code` is the FPL API's
+    stable cross-snapshot/cross-season player identity (see
+    apex_fpl.backtesting.player_identity) — exposed here so
+    apex_fpl.serving.gameweek_history's reconstructed per-gameweek
+    history, which is keyed by code, can be joined against it."""
     clubs = load_clubs()
     players = _latest_by_key(_read_csv("players.csv"), "player_id")
     out = {}
@@ -119,6 +123,7 @@ def load_players() -> dict[str, dict]:
         chance_next = _parse_chance(r.get("chance_of_playing_next_round"))
         out[pid] = {
             "name": r["web_name"],
+            "code": r["code"],
             "position": POSITION_BY_ELEMENT_TYPE[int(r["element_type_id"])],
             "team": clubs[int(r["team_id"])],
             "price": int(r["now_cost"]) / 10.0,

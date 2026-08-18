@@ -44,9 +44,9 @@ def test_load_clubs_parses_correctly(canonical_dir):
 
 def test_load_players_maps_element_type_to_gk_convention(canonical_dir):
     _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [{"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}])
-    _write_csv(canonical_dir / "players.csv", ["player_id", "web_name", "team_id", "element_type_id", "now_cost", "selected_by_percent", "status", "retrieved_at"], [
-        {"player_id": "10", "web_name": "Raya", "team_id": "1", "element_type_id": "1", "now_cost": "60", "selected_by_percent": "31.2", "status": "a", "retrieved_at": "t"},
-        {"player_id": "11", "web_name": "Saka", "team_id": "1", "element_type_id": "3", "now_cost": "100", "selected_by_percent": "45.0", "status": "a", "retrieved_at": "t"},
+    _write_csv(canonical_dir / "players.csv", ["player_id", "code", "web_name", "team_id", "element_type_id", "now_cost", "selected_by_percent", "status", "retrieved_at"], [
+        {"player_id": "10", "code": "154561", "web_name": "Raya", "team_id": "1", "element_type_id": "1", "now_cost": "60", "selected_by_percent": "31.2", "status": "a", "retrieved_at": "t"},
+        {"player_id": "11", "code": "223340", "web_name": "Saka", "team_id": "1", "element_type_id": "3", "now_cost": "100", "selected_by_percent": "45.0", "status": "a", "retrieved_at": "t"},
     ])
     players = ld.load_players()
     assert players["10"]["position"] == "GK"  # element_type_id=1 maps to "GK", NOT bootstrap-static's own "GKP" string
@@ -54,31 +54,32 @@ def test_load_players_maps_element_type_to_gk_convention(canonical_dir):
     assert players["10"]["price"] == 6.0
     assert players["10"]["selected_by_percent"] == 31.2  # real API field is a string ("31.2"), parsed to float here
     assert players["10"]["team"] == "Arsenal"
+    assert players["10"]["code"] == "154561"
 
 
 def test_load_players_computes_availability_probability(canonical_dir):
     _write_csv(canonical_dir / "clubs.csv", ["club_id", "name", "retrieved_at"], [{"club_id": "1", "name": "Arsenal", "retrieved_at": "t"}])
     _write_csv(
         canonical_dir / "players.csv",
-        ["player_id", "web_name", "team_id", "element_type_id", "now_cost", "selected_by_percent", "status",
+        ["player_id", "code", "web_name", "team_id", "element_type_id", "now_cost", "selected_by_percent", "status",
          "chance_of_playing_this_round", "chance_of_playing_next_round", "retrieved_at"],
         [
             # healthy player: both null -- must be 100%, not excluded. This is the real,
             # confirmed shape for the vast majority of the player pool.
-            {"player_id": "1", "web_name": "Healthy", "team_id": "1", "element_type_id": "1", "now_cost": "50",
+            {"player_id": "1", "code": "1001", "web_name": "Healthy", "team_id": "1", "element_type_id": "1", "now_cost": "50",
              "selected_by_percent": "10.0", "status": "a", "chance_of_playing_this_round": "", "chance_of_playing_next_round": "",
              "retrieved_at": "t"},
             # this_round populated: takes priority over next_round
-            {"player_id": "2", "web_name": "ThisRound", "team_id": "1", "element_type_id": "2", "now_cost": "50",
+            {"player_id": "2", "code": "1002", "web_name": "ThisRound", "team_id": "1", "element_type_id": "2", "now_cost": "50",
              "selected_by_percent": "10.0", "status": "d", "chance_of_playing_this_round": "75", "chance_of_playing_next_round": "0",
              "retrieved_at": "t"},
             # this_round null, next_round populated -- the real pre-season shape confirmed
             # against live data: falls back to next_round.
-            {"player_id": "3", "web_name": "NextRoundOnly", "team_id": "1", "element_type_id": "3", "now_cost": "50",
+            {"player_id": "3", "code": "1003", "web_name": "NextRoundOnly", "team_id": "1", "element_type_id": "3", "now_cost": "50",
              "selected_by_percent": "10.0", "status": "d", "chance_of_playing_this_round": "", "chance_of_playing_next_round": "25",
              "retrieved_at": "t"},
             # both null, non-'a' status: the rare defensive fallback -- excluded, not 50/50.
-            {"player_id": "4", "web_name": "FlaggedNoNumber", "team_id": "1", "element_type_id": "4", "now_cost": "50",
+            {"player_id": "4", "code": "1004", "web_name": "FlaggedNoNumber", "team_id": "1", "element_type_id": "4", "now_cost": "50",
              "selected_by_percent": "10.0", "status": "i", "chance_of_playing_this_round": "", "chance_of_playing_next_round": "",
              "retrieved_at": "t"},
         ],

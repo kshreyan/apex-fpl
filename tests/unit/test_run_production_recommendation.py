@@ -71,3 +71,52 @@ def test_fixture_inputs_and_meta_include_one_entry_per_fixture_not_per_team():
     assert len(fixture_inputs) == 2  # both real matches simulated, not collapsed into one
     assert len(fixture_meta) == 2
     assert {(f["home_team"], f["away_team"]) for f in fixture_meta} == {("Arsenal", "Chelsea"), ("Everton", "Arsenal")}
+
+
+def _write_snapshot(raw_root, gw_dir, filename, highest_settled):
+    """One captured snapshot representing the pipeline's state right
+    after gameweek `highest_settled` settled -- callers write one of
+    these PER settled gameweek to simulate the daily pipeline actually
+    having run and captured evidence at each boundary in turn (a single
+    snapshot jumping straight to a high highest_settled value does NOT
+    imply the intermediate gameweeks were ever captured -- see
+    apex_fpl.serving.gameweek_history's own "skip the gap, don't guess"
+    behavior, which this count must reflect)."""
+    d = raw_root / gw_dir / "bootstrap_static"
+    d.mkdir(parents=True, exist_ok=True)
+    events = [{"id": i, "finished": i <= highest_settled, "data_checked": i <= highest_settled} for i in range(1, 8)]
+    (d / filename).write_text('{"events": %s, "elements": []}' % __import__("json").dumps(events))
+
+
+def test_usable_settled_gameweek_count_below_transition_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr(rpr.gwh, "RAW_DATA_ROOT", tmp_path)
+    for gw in range(1, 5):
+        _write_snapshot(tmp_path, f"gw0{gw}", "a.json", highest_settled=gw)
+
+    count = rpr.usable_settled_gameweek_count(target_gw=5)
+
+    assert count == 4
+    assert count < rpr.IN_SEASON_TRANSITION_MIN_SETTLED_GWS
+
+
+def test_usable_settled_gameweek_count_at_transition_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr(rpr.gwh, "RAW_DATA_ROOT", tmp_path)
+    for gw in range(1, 7):
+        _write_snapshot(tmp_path, f"gw0{gw}", "a.json", highest_settled=gw)
+
+    count = rpr.usable_settled_gameweek_count(target_gw=7)
+
+    assert count == 6
+    assert count >= rpr.IN_SEASON_TRANSITION_MIN_SETTLED_GWS
+
+
+def test_usable_settled_gameweek_count_ignores_snapshots_after_target_gw(tmp_path, monkeypatch):
+    """A settlement snapshot for gw=6 must not count toward a target_gw=5
+    recommendation -- that would be leakage (using a result the target
+    gameweek's own prediction must not have seen yet)."""
+    monkeypatch.setattr(rpr.gwh, "RAW_DATA_ROOT", tmp_path)
+    _write_snapshot(tmp_path, "gw06", "a.json", highest_settled=6)
+
+    count = rpr.usable_settled_gameweek_count(target_gw=5)
+
+    assert count == 0

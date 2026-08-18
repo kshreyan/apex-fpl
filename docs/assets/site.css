@@ -108,6 +108,7 @@ main > section, .record-card, .notice { transition: box-shadow 0.2s ease; }
 
 .notice { border: 1px solid var(--critical-soft); background: var(--critical-soft); display: flex; gap: var(--space-3); align-items: flex-start; }
 .notice .badge { flex-shrink: 0; }
+.notice-warning { border-color: var(--warning-soft); background: var(--warning-soft); }
 
 .section-note { color: var(--muted); font-size: 0.9rem; margin-top: calc(var(--space-4) * -1 + var(--space-2)); margin-bottom: var(--space-4); }
 .misses-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-5); }

@@ -28,6 +28,18 @@ def test_validate_fixtures_accepts_null_scores_for_unplayed_fixtures():
     fc.validate_fixtures(_valid_fixtures())  # must not raise -- null is legitimate, not a schema violation
 
 
+def test_validate_bootstrap_static_accepts_bare_int_zero_for_defensive_contribution_per_90():
+    """Real live-API behavior (broke an actual pipeline run on 2026-08-18,
+    caught within hours by the healthcheck/monitoring loop): the API
+    serializes an exact-zero rate as the bare JSON int 0, not 0.0, while
+    any nonzero value comes through as a float. A player with any minutes
+    played but zero defensive actions -- the common case pre-season and
+    for most attackers -- must not fail validation."""
+    payload = _valid_bootstrap_static()
+    payload["elements"][0]["defensive_contribution_per_90"] = 0
+    fc.validate_bootstrap_static(payload)  # must not raise
+
+
 def test_validate_bootstrap_static_raises_specific_error_on_missing_field():
     bad = _valid_bootstrap_static()
     del bad["events"][0]["data_checked"]

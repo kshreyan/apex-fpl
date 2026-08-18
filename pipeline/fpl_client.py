@@ -69,13 +69,16 @@ BOOTSTRAP_LIST_FIELD_SPECS: dict[str, dict[str, type | tuple[type, ...]]] = {
         "chance_of_playing_next_round": _NULLABLE_INT,
         # Defensive Contribution (DefCon, live from 2025/26) raw stats --
         # captured now, not yet modeled anywhere (Phase 13 Block 1.4).
-        # Types confirmed against real live data (2026-08-16 snapshot):
-        # all int except the _per_90 rate, which is a float.
+        # Types confirmed against real live data: the _per_90 rate is a
+        # float for any nonzero value, but the API serializes an exact
+        # zero as the bare JSON int 0, not 0.0 (reconfirmed live on
+        # 2026-08-18 after this broke a real pipeline run -- e.g. Raya,
+        # 3330 minutes played, reports defensive_contribution_per_90: 0).
         "clearances_blocks_interceptions": int,
         "recoveries": int,
         "tackles": int,
         "defensive_contribution": int,
-        "defensive_contribution_per_90": float,
+        "defensive_contribution_per_90": (int, float),
     },
     "element_types": {
         "id": int, "squad_select": int, "squad_min_play": int, "squad_max_play": int,

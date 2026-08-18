@@ -99,10 +99,21 @@ def simulate_gameweek(
     seed: int = 2026,
 ) -> dict[str, PlayerSimResult]:
     rng = np.random.default_rng(seed)
-    team_fixture = {}
+    # A team's fixtures THIS gameweek -- usually one, but a real double
+    # gameweek gives it two. Was a plain dict overwrite (team -> single
+    # (fx, side)) until this fix -- the exact same silent-second-fixture-
+    # drop bug already found and fixed in
+    # scripts/run_production_recommendation.py's team goal aggregation,
+    # except here it also silently dropped a DGW player's SECOND
+    # fixture's appearance points, clean sheet, and goals-conceded
+    # penalty entirely (not just an approximation, an outright miss —
+    # never triggered in practice since no real double gameweek has hit
+    # this simulator yet, but it would have produced a wrong, confident
+    # number the first time one did).
+    team_fixtures: dict[str, list[tuple[FixtureInput, str]]] = {}
     for fx in fixtures:
-        team_fixture[fx.home_team] = (fx, "home")
-        team_fixture[fx.away_team] = (fx, "away")
+        team_fixtures.setdefault(fx.home_team, []).append((fx, "home"))
+        team_fixtures.setdefault(fx.away_team, []).append((fx, "away"))
 
     accum: dict[str, list[np.ndarray]] = {p.player_id: [] for p in players}
     minutes_accum: dict[str, list[np.ndarray]] = {p.player_id: [] for p in players}
@@ -120,28 +131,65 @@ def simulate_gameweek(
             fixture_draws[id(fx)] = (gh, ga)
 
         for p in players:
-            fx, side = team_fixture[p.team]
-            gh, ga = fixture_draws[id(fx)]
-            goals_against = ga if side == "home" else gh
-
+            p_fixtures = team_fixtures[p.team]
             p_app = max(p.minutes_forecast.p_appearance, 1e-6)
-            u = rng.random(n)
-            minutes = np.where(
-                u < p.minutes_forecast.p_60_plus, p.minutes_forecast.expected_minutes_if_played,
-                np.where(u < p.minutes_forecast.p_appearance, rng.uniform(1, 59, n), 0.0),
-            )
-            played = minutes > 0
 
+            # An independent minutes/appearance draw per fixture (same
+            # marginal distribution reused for each match -- this simulator
+            # has no basis to model rotation risk as correlated ACROSS a
+            # double gameweek's two specific matches, an honest simplifying
+            # assumption, not an oversight). For len(p_fixtures) == 1 (the
+            # overwhelming common case) this is exactly one draw, identical
+            # to this function's pre-fix behavior.
+            per_fixture_minutes, per_fixture_goals_against = [], []
+            for fx, side in p_fixtures:
+                gh, ga = fixture_draws[id(fx)]
+                goals_against = ga if side == "home" else gh
+                u = rng.random(n)
+                minutes = np.where(
+                    u < p.minutes_forecast.p_60_plus, p.minutes_forecast.expected_minutes_if_played,
+                    np.where(u < p.minutes_forecast.p_appearance, rng.uniform(1, 59, n), 0.0),
+                )
+                per_fixture_minutes.append(minutes)
+                per_fixture_goals_against.append(goals_against)
+
+            # Goals/assists: ONE pooled draw across the whole gameweek, using
+            # the combined expected_goals/expected_assists already summed
+            # across fixtures upstream (build_fixture_inputs_and_team_goals),
+            # not split per fixture -- there is no principled way to
+            # attribute a combined goal-involvement rate to one specific
+            # match of a double gameweek without a fuller joint model than
+            # this baseline simulator implements (Phase 6 territory).
+            # Credited if the player appeared in ANY of their fixtures.
+            any_played = np.zeros(n, dtype=bool)
+            for minutes in per_fixture_minutes:
+                any_played |= minutes > 0
             lam_g = p.expected_goals / p_app
             lam_a = p.expected_assists / p_app
-            goals = np.where(played, rng.poisson(lam_g, n), 0)
-            assists = np.where(played, rng.poisson(lam_a, n), 0)
-            clean_sheet = played & (minutes >= 60) & (goals_against == 0)
-            goals_conceded = np.where(played, goals_against, 0)
+            goals = np.where(any_played, rng.poisson(lam_g, n), 0)
+            assists = np.where(any_played, rng.poisson(lam_a, n), 0)
 
-            pts = _vectorized_points(p.position, minutes, goals, assists, clean_sheet, goals_conceded, rules)
+            # Appearance points, clean sheet, and goals-conceded penalty ARE
+            # computed per fixture and summed -- these genuinely happen once
+            # per match played, matching real FPL double-gameweek scoring.
+            # Goals/assists points are added on the first fixture's pass
+            # only (zero on any subsequent one) so the pooled draw above is
+            # scored exactly once, not once per fixture.
+            pts = np.zeros(n)
+            for i, (minutes, goals_against) in enumerate(zip(per_fixture_minutes, per_fixture_goals_against)):
+                played = minutes > 0
+                clean_sheet = played & (minutes >= 60) & (goals_against == 0)
+                goals_conceded = np.where(played, goals_against, 0)
+                fixture_goals = goals if i == 0 else np.zeros(n, dtype=int)
+                fixture_assists = assists if i == 0 else np.zeros(n, dtype=int)
+                pts += _vectorized_points(p.position, minutes, fixture_goals, fixture_assists, clean_sheet, goals_conceded, rules)
+
+            minutes_total = per_fixture_minutes[0]
+            for m in per_fixture_minutes[1:]:
+                minutes_total = minutes_total + m
+
             accum[p.player_id].append(pts)
-            minutes_accum[p.player_id].append(minutes)
+            minutes_accum[p.player_id].append(minutes_total)
 
         total_sims += n
         means_now = {pid: float(np.mean(np.concatenate(v))) for pid, v in accum.items()}

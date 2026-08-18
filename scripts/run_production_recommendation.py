@@ -60,19 +60,28 @@ historical season). This script instead:
   actually ran (`in_season_mode`, `settled_gameweeks_reconstructed` in
   the output) rather than presenting either path as the silent default.
 
-**Double gameweeks: a stated, partial fix, not a full one.** Properly
-simulating two independent fixtures for one player needs the model's own
-simulator (apex_fpl.simulation.monte_carlo) to represent multiple
-fixtures per player — it currently doesn't, and extending it is a model
-change, out of scope for this orchestration layer. What WAS fixable here:
-this script used to silently drop a double-gameweek team's second
-fixture entirely (a plain dict overwrite, `fixture_expected_goals[(team,
-side)] = eh`, clobbered by whichever fixture was processed last — found
-while building the automated pipeline, not previously caught). Fixed to
-SUM a team's expected goals across all its fixtures that gameweek before
-allocating player shares — still an approximation (two independent
-matches collapsed into one combined-goals match, losing their separate
-correlation structure), but a stated one instead of a silent under-count.
+**Double gameweeks (Phase 13 Block 2.6).** `apex_fpl.simulation.
+monte_carlo.simulate_gameweek` now genuinely simulates a double-
+gameweek player's TWO independent fixtures, not one: appearance points,
+clean sheet, and the goals-conceded penalty are each drawn and scored
+PER fixture and summed (matching real FPL double-gameweek scoring
+exactly), using that same fixture's own simulated scoreline for each.
+Found and fixed alongside this script's own earlier team-goals bug (a
+plain dict overwrite that silently dropped a double-gameweek team's
+SECOND fixture from the goal-allocation total) — the simulator had the
+identical bug one layer deeper: `team_fixture[team] = (fx, side)`
+silently overwrote to the last-processed fixture, so a double-gameweek
+player's minutes/clean-sheet/conceded were previously computed against
+only ONE of their two matches, not an approximation but an outright
+miss (never triggered live yet, since no real double gameweek has hit
+this simulator until now). The one remaining, honestly-scoped
+simplification: goals/assists are POOLED into a single Poisson draw
+across BOTH fixtures (using the combined expected_goals/expected_assists
+this script already sums here, `team_exp_goals_total`), credited once,
+rather than split per fixture — there is no principled way to attribute
+a combined goal-involvement rate to one specific match without a fuller
+joint model than this baseline simulator implements (Phase 6 territory,
+not this).
 Any gameweek with a double fixture gets an explicit `model_caveats` entry
 naming the affected team(s), rather than looking identical to a normal
 week.
@@ -230,14 +239,17 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     else:
         log(f"--- Only {settled_gw_count} settled gameweek(s) reconstructed (< {IN_SEASON_TRANSITION_MIN_SETTLED_GWS}) -- staying on cold-start models ---\n")
 
-    # team_expected_goals sums ALL of a team's fixtures this gameweek (a double-gameweek
-    # team plays twice) -- see module docstring's "Double gameweeks" section for why this
-    # is a stated approximation (one combined match), not full independent-fixture modeling.
+    # team_expected_goals sums ALL of a team's fixtures this gameweek -- used
+    # to compute each player's POOLED expected_goals/expected_assists (see
+    # module docstring's "Double gameweeks" section); the simulator itself
+    # (apex_fpl.simulation.monte_carlo) now scores appearance/clean-sheet/
+    # conceded per fixture correctly, using fixture_inputs below, which
+    # already carries one entry per real fixture, not a combined one.
     fixture_inputs, fixture_meta, team_expected_goals = build_fixture_inputs_and_team_goals(target_fixtures, team_model)
 
     teams_with_double_fixture = sorted(team for team, goals in team_expected_goals.items() if len(goals) > 1)
     if teams_with_double_fixture:
-        log(f"Double gameweek detected for: {', '.join(teams_with_double_fixture)} — combining into one summed-goals match (see module docstring)\n")
+        log(f"Double gameweek detected for: {', '.join(teams_with_double_fixture)} — both fixtures simulated independently, goals/assists pooled across them (see module docstring)\n")
 
     if in_season_mode:
         # Grouped by team only, ALL positions included (matches the validated
@@ -321,9 +333,12 @@ def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact
     if teams_with_double_fixture:
         caveats.append(
             f"Double gameweek this week for: {', '.join(teams_with_double_fixture)}. "
-            "Modeled as one combined-goals match per team, not two independent fixtures with their own "
-            "correlation structure -- the model's simulator does not yet support multiple fixtures per "
-            "player per gameweek (a model-layer limitation, not fixed here)."
+            "Appearance points, clean sheet, and the goals-conceded penalty are simulated independently "
+            "per fixture and summed, matching real FPL double-gameweek scoring. Goals/assists are the "
+            "one remaining simplification: pooled into a single combined-rate draw across both fixtures "
+            "rather than split per match, since there's no principled way to attribute a combined "
+            "goal-involvement rate to one specific fixture without a fuller joint model than this "
+            "baseline simulator implements."
         )
 
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")

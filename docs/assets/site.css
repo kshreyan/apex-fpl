@@ -113,7 +113,7 @@ main > section, .record-card, .notice { transition: box-shadow 0.2s ease; }
 .section-note { color: var(--muted); font-size: 0.9rem; margin-top: calc(var(--space-4) * -1 + var(--space-2)); margin-bottom: var(--space-4); }
 .misses-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-5); }
 @media (min-width: 640px) { .misses-grid { grid-template-columns: 1fr 1fr; } }
-.misses-grid h3 { color: var(--ink-2); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.misses-grid h3, .misses-grid h4 { color: var(--ink-2); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .misses-grid ul { margin: 0; padding-left: 1.1em; }
 .misses-grid li { margin-bottom: var(--space-2); }
 

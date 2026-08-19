@@ -128,3 +128,17 @@ def test_a_missing_gameweek_in_the_sequence_is_skipped_not_treated_as_zero(monke
     record = pc.evaluate_chip("bboost", target_gw=4, marginal_value=6.0, model_version="abc")
     # sequence should be [5.0, 5.0, 6.0] (3 observed), NOT [5.0, 5.0, None-as-0, 6.0] (4 observed)
     assert record["window"]["n_observed_including_this_gw"] == 3
+
+
+def test_wildcard_is_evaluated_alongside_the_other_three_chips():
+    assert set(pc.CHIP_NAMES) == {"bboost", "3xc", "freehit", "wildcard"}
+
+
+def test_wildcard_at_gw1_is_window_not_open(monkeypatch, tmp_path):
+    """Real rule: wildcard/freehit start_event=2, both unusable in GW1."""
+    _install_tmp_ledger(monkeypatch, tmp_path)
+    monkeypatch.setattr(pc.es, "already_played_chips", lambda: [])
+
+    record = pc.evaluate_chip("wildcard", target_gw=1, marginal_value=None, model_version="abc")
+
+    assert record["decision"] == "WINDOW_NOT_OPEN"

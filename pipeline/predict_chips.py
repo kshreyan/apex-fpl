@@ -22,11 +22,18 @@ you already own and would revert to, which has no such timing problem:
 it reflects the last SETTLED gameweek, always knowable well before the
 next deadline.
 
-**Wildcard is NOT computed here — a real, disclosed gap, not an
-oversight.** Its value needs a multi-gameweek-ahead EP forecast (the
-same live forecasting pipeline predict_transfers.py's horizon=1 scope
-explicitly deferred) to compare a constrained vs. unconstrained horizon
-total; that pipeline doesn't exist yet.
+**Wildcard uses the same multi-gameweek forecasting foundation as
+predict_transfers.py's horizon=4 lookahead** (scripts/
+run_production_recommendation.build_multi_gameweek_forecasts), at
+Phase 9's own validated WILDCARD_HORIZON=3 / WILDCARD_FREE_TRANSFERS=15
+configuration (docs/phase9_chip_valuation_report.md,
+scripts/run_phase9_chip_valuation_demo.py) -- two full horizon MILP
+solves (transfer-constrained vs. effectively-unconstrained, both
+starting from the same real held squad) rather than one, so this is
+the most expensive chip to evaluate here, not the cheapest. Same real-
+squad timing story as Free Hit, not Bench Boost/Triple Captain's
+model-squad workaround: Wildcard is a comparison against the squad you
+already own.
 
 **The ledger is one file PER CHIP, not per gameweek** (data/chip_
 observations/{chip_name}.jsonl) — deliberately different from
@@ -49,6 +56,7 @@ from pathlib import Path
 from apex_fpl.data import bronze
 from apex_fpl.optimization import chips as ch
 from apex_fpl.optimization import squad as sq
+from apex_fpl.optimization import transfers as tr
 from apex_fpl.rules import chip_windows as cw
 from apex_fpl.serving import entry_state as es
 from apex_fpl.serving import live_data as ld
@@ -61,7 +69,11 @@ LEDGER_DIR = REPO_ROOT / "data" / "chip_observations"
 
 SCHEMA_VERSION = "1.0"
 MIN_HOURS_BEFORE_DEADLINE = 2.0
-CHIP_NAMES = ["bboost", "3xc", "freehit"]  # wildcard excluded -- see module docstring
+CHIP_NAMES = ["bboost", "3xc", "freehit", "wildcard"]
+WILDCARD_HORIZON = 3  # matches scripts/run_phase9_chip_valuation_demo.py's own validated choice
+WILDCARD_FREE_TRANSFERS = 15  # matches the same script -- "effectively unlimited" for one horizon
+TRANSFER_TIME_LIMIT = 60.0
+TRANSFER_SHORTLIST_PER_POSITION = 15
 
 EXIT_OK = 0
 EXIT_TOO_CLOSE_TO_DEADLINE = 3
@@ -182,38 +194,68 @@ def run(dry_run: bool = False) -> int:
         print(f"WARNING: only {phase_info.hours_until_deadline:.2f}h until deadline — refusing to run this close.")
         return EXIT_TOO_CLOSE_TO_DEADLINE
 
-    print("--- Building this gameweek's expected-points forecast for the full live pool ---")
-    from run_production_recommendation import build_player_forecasts
-    forecasts = build_player_forecasts(target_gw, log=print)
-    sim_results = forecasts["sim_results"]
-    candidates_meta = forecasts["candidates_meta"]
+    print(f"--- Building a {WILDCARD_HORIZON}-gameweek expected-points forecast for the full live pool ---")
+    from run_production_recommendation import build_multi_gameweek_forecasts
+    horizon_forecasts = build_multi_gameweek_forecasts(target_gw, horizon=WILDCARD_HORIZON, log=print)
+    this_gw = horizon_forecasts[target_gw]
+    if this_gw is None:
+        print(f"GW{target_gw} itself has no fixtures (a blank gameweek) — no chip can be meaningfully valued this week.")
+        this_gw = {"sim_results": {}, "candidates_meta": {}}
+    sim_results = this_gw["sim_results"]
+    candidates_meta = this_gw["candidates_meta"]
 
     print("--- Selecting the model's own from-scratch squad this gameweek (used for Bench Boost/Triple Captain) ---")
-    ev_candidates = [sq.PlayerCandidate(pid, m["position"], m["team"], m["price"], sim_results[pid].mean_points, m["availability_probability"]) for pid, m in candidates_meta.items() if pid in sim_results]
-    my_squad = sq.select_squad(ev_candidates, budget=sq.BUDGET)
-    my_xi = sq.select_starting_xi(my_squad)
-    bench_ep = [sim_results[p.player_id].mean_points for p in my_xi.bench]
-    captain_ep = sim_results[my_xi.captain.player_id].mean_points
-    best_possible_xi_ep = sum(sim_results[p.player_id].mean_points for p in my_xi.starters) + captain_ep
+    marginal_values: dict[str, float | None] = {"bboost": None, "3xc": None, "freehit": None, "wildcard": None}
+    if sim_results:
+        ev_candidates = [sq.PlayerCandidate(pid, m["position"], m["team"], m["price"], sim_results[pid].mean_points, m["availability_probability"]) for pid, m in candidates_meta.items() if pid in sim_results]
+        my_squad = sq.select_squad(ev_candidates, budget=sq.BUDGET)
+        my_xi = sq.select_starting_xi(my_squad)
+        bench_ep = [sim_results[p.player_id].mean_points for p in my_xi.bench]
+        captain_ep = sim_results[my_xi.captain.player_id].mean_points
+        best_possible_xi_ep = sum(sim_results[p.player_id].mean_points for p in my_xi.starters) + captain_ep
+        marginal_values["bboost"] = ch.value_bench_boost(bench_ep)
+        marginal_values["3xc"] = ch.value_triple_captain(captain_ep)
 
-    print("--- Fetching real held squad (used for Free Hit) ---")
+    print("--- Fetching real held squad (used for Free Hit and Wildcard) ---")
     players = ld.load_players()
     now_cost_by_element = {int(pid): int(round(meta["price"] * 10)) for pid, meta in players.items()}
     squad_state = es.build_current_squad_state(now_cost_by_element)
 
-    marginal_values: dict[str, float | None] = {"bboost": ch.value_bench_boost(bench_ep), "3xc": ch.value_triple_captain(captain_ep)}
-    if squad_state is not None and squad_state.as_of_gw + 1 == target_gw:
+    if squad_state is None or squad_state.as_of_gw + 1 != target_gw:
+        print("No settled-gameweek squad state available yet (or inconsistent with target_gw) — skipping Free Hit and Wildcard valuation.")
+    elif not sim_results:
+        pass  # already reported the blank-gameweek reason above
+    else:
         real_candidates = [sq.PlayerCandidate(pid, candidates_meta[pid]["position"], candidates_meta[pid]["team"], candidates_meta[pid]["price"], sim_results[pid].mean_points, candidates_meta[pid]["availability_probability"]) for pid in squad_state.squad_ids if pid in sim_results and pid in candidates_meta]
-        if len(real_candidates) == len(squad_state.squad_ids):
+        if len(real_candidates) != len(squad_state.squad_ids):
+            print("Real squad has a player outside the live candidate pool — skipping Free Hit and Wildcard valuation this run.")
+        else:
             real_xi = sq.select_starting_xi(real_candidates)
             current_xi_ep = sum(sim_results[p.player_id].mean_points for p in real_xi.starters) + sim_results[real_xi.captain.player_id].mean_points
             marginal_values["freehit"] = ch.value_free_hit(current_xi_ep, best_possible_xi_ep)
-        else:
-            marginal_values["freehit"] = None
-            print("Real squad has a player outside the live candidate pool — skipping Free Hit valuation this run.")
-    else:
-        marginal_values["freehit"] = None
-        print("No settled-gameweek squad state available yet (or inconsistent with target_gw) — skipping Free Hit valuation.")
+
+            print(f"--- Solving Wildcard's two horizon plans (constrained vs. unconstrained, horizon={WILDCARD_HORIZON}) ---")
+            all_ids = set().union(*(set(horizon_forecasts[gw]["candidates_meta"]) for gw in horizon_forecasts if horizon_forecasts[gw])) | set(squad_state.squad_ids)
+            horizon_players = []
+            for pid in all_ids:
+                meta = next((horizon_forecasts[gw]["candidates_meta"][pid] for gw in horizon_forecasts if horizon_forecasts[gw] and pid in horizon_forecasts[gw]["candidates_meta"]), None)
+                if meta is None:
+                    continue
+                ep_by_gw = tuple(
+                    horizon_forecasts[gw]["sim_results"][pid].mean_points if horizon_forecasts[gw] and pid in horizon_forecasts[gw]["sim_results"] else 0.0
+                    for gw in sorted(horizon_forecasts)
+                )
+                horizon_players.append(tr.HorizonPlayer(player_id=pid, position=meta["position"], team=meta["team"], price=meta["price"], ep_by_gw=ep_by_gw))
+
+            constrained_plan = tr.plan_transfers(
+                squad_state.squad_ids, squad_state.sell_price_by_id, squad_state.bank, squad_state.free_transfers,
+                horizon_players, horizon=WILDCARD_HORIZON, time_limit=TRANSFER_TIME_LIMIT, shortlist_per_position=TRANSFER_SHORTLIST_PER_POSITION,
+            )
+            unconstrained_plan = tr.plan_transfers(
+                squad_state.squad_ids, squad_state.sell_price_by_id, squad_state.bank, WILDCARD_FREE_TRANSFERS,
+                horizon_players, horizon=WILDCARD_HORIZON, time_limit=TRANSFER_TIME_LIMIT, shortlist_per_position=TRANSFER_SHORTLIST_PER_POSITION,
+            )
+            marginal_values["wildcard"] = ch.value_wildcard(constrained_plan.total_net_expected_points, unconstrained_plan.total_net_expected_points)
 
     records = []
     for chip_name in CHIP_NAMES:

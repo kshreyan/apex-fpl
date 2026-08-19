@@ -116,7 +116,7 @@ def _all_transfer_recommendations() -> dict[int, list[dict]]:
     return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(TRANSFER_RECOMMENDATIONS_DIR.glob("gw*.jsonl"))}
 
 
-CHIP_DISPLAY_NAMES = {"bboost": "Bench Boost", "3xc": "Triple Captain", "freehit": "Free Hit"}
+CHIP_DISPLAY_NAMES = {"bboost": "Bench Boost", "3xc": "Triple Captain", "freehit": "Free Hit", "wildcard": "Wildcard"}
 
 
 def _all_chip_observations() -> dict[str, list[dict]]:

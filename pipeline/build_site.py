@@ -60,6 +60,7 @@ PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
 TRANSFER_RECOMMENDATIONS_DIR = REPO_ROOT / "data" / "transfer_recommendations"
 CHIP_OBSERVATIONS_DIR = REPO_ROOT / "data" / "chip_observations"
 EXECUTION_DIVERGENCE_DIR = REPO_ROOT / "data" / "execution_divergence"
+FIELD_SIMULATION_VALIDATION_DIR = REPO_ROOT / "data" / "field_simulation_validation"
 RESULTS_DIR = REPO_ROOT / "data" / "results"
 CALIBRATION_PATH = REPO_ROOT / "data" / "calibration.json"
 DOCS_ROOT = REPO_ROOT / "docs"
@@ -128,6 +129,21 @@ def _all_chip_observations() -> dict[str, list[dict]]:
     if not CHIP_OBSERVATIONS_DIR.exists():
         return {}
     return {p.stem: _read_ledger_lines(p) for p in sorted(CHIP_OBSERVATIONS_DIR.glob("*.jsonl"))}
+
+
+def _all_field_simulation_validation() -> list[dict]:
+    """One record per settled gameweek, ordered by gameweek -- see
+    pipeline/validate_field_simulation.py's own docstring (item 5 of the
+    "explicitly disclosed, not built" gaps: external validation of the
+    field/rank simulator against real average_entry_score)."""
+    if not FIELD_SIMULATION_VALIDATION_DIR.exists():
+        return []
+    records = []
+    for p in sorted(FIELD_SIMULATION_VALIDATION_DIR.glob("gw*.jsonl")):
+        lines = _read_ledger_lines(p)
+        if lines:
+            records.append(lines[-1])
+    return sorted(records, key=lambda r: r["gameweek"])
 
 
 def _all_execution_divergence() -> dict[int, dict]:
@@ -674,7 +690,33 @@ def build_gameweek_page(gw: int, prediction: dict | None, result: dict | None, i
     return _page(f"Gameweek {gw}", f"APEX FPL's prediction and result for gameweek {gw}.", "", body, rebuilt_at_utc)
 
 
-def build_methodology_page(rebuilt_at_utc: str) -> str:
+def _field_simulation_validation_section(records: list[dict]) -> str:
+    """Item 5 of the "explicitly disclosed, not built" gaps: the field/
+    rank simulator's live, pre-deadline predicted mean score for the
+    competitive field, checked against real average_entry_score once
+    each gameweek settles. Not a pass/fail gate (see
+    pipeline/validate_field_simulation.py's own docstring) -- just the
+    raw numbers, transparently, gameweek by gameweek."""
+    if not records:
+        return (
+            "<p>No live gameweek has settled yet with a field-simulator prediction on record — "
+            "nothing to validate yet. This section will show predicted vs. actual once one does.</p>"
+        )
+    def _row(r: dict) -> str:
+        error_str = f"{r['absolute_error']:+}"
+        return (
+            f"<tr><td>GW{esc(r['gameweek'])}</td><td>{esc(r['predicted_field_mean_score'])}</td>"
+            f"<td>{esc(r['actual_average_entry_score'])}</td><td>{esc(error_str)}</td></tr>"
+        )
+    rows = "".join(_row(r) for r in records)
+    return (
+        '<table class="data-table"><caption>Field simulator: predicted mean score vs. real average_entry_score</caption>'
+        "<thead><tr><th>Gameweek</th><th>Predicted</th><th>Actual</th><th>Error</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def build_methodology_page(rebuilt_at_utc: str, field_simulation_validation: list[dict] | None = None) -> str:
     body = raw(
         "<h1>Methodology</h1>"
         "<p>APEX FPL forecasts Fantasy Premier League points using a Monte Carlo simulation "
@@ -739,6 +781,15 @@ def build_methodology_page(rebuilt_at_utc: str) -> str:
         "are historical simulation, generated with hindsight, and are never combined with or "
         "presented alongside the live calibration record on this site. The record shown here is "
         "exclusively real predictions, committed before their deadlines.</p>"
+        "<h2>Field/rank simulator validation</h2>"
+        "<p>A separate competitive-field Monte Carlo (not the squad model above) estimates the "
+        "real field's mean score each gameweek from real live ownership data, recorded before "
+        "the deadline and checked once each gameweek settles against the FPL API's real "
+        "<code>average_entry_score</code> — an independent ground truth that doesn't exist in "
+        "this project's historical research archive, so this live check is the first time it's "
+        "been validated against real data at all. Not a pass/fail gate: shown as raw numbers, "
+        "left for judgment across enough gameweeks to mean something.</p>"
+        + raw(_field_simulation_validation_section(field_simulation_validation or []))
     )
     return _page("Methodology", "How the APEX FPL model works, and what it doesn't model.", "/methodology/", body, rebuilt_at_utc)
 
@@ -915,11 +966,12 @@ def run() -> None:
     transfer_recommendations = _all_transfer_recommendations()
     chip_observations = _all_chip_observations()
     execution_divergence = _all_execution_divergence()
+    field_simulation_validation = _all_field_simulation_validation()
     rebuilt_at_utc = calibration["rebuilt_at_utc"]
 
     _write(DOCS_ROOT / "index.html", build_homepage(calibration, predictions, results))
     _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions, transfer_recommendations, chip_observations))
-    _write(DOCS_ROOT / "methodology" / "index.html", build_methodology_page(rebuilt_at_utc))
+    _write(DOCS_ROOT / "methodology" / "index.html", build_methodology_page(rebuilt_at_utc, field_simulation_validation))
 
     missing = set(calibration["coverage"]["gameweeks_missing_prediction"] or [])
     all_gws = sorted(set(predictions) | set(results) | missing)

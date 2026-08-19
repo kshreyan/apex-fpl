@@ -32,6 +32,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(build_site, "TRANSFER_RECOMMENDATIONS_DIR", root / "data" / "transfer_recommendations")
     monkeypatch.setattr(build_site, "CHIP_OBSERVATIONS_DIR", root / "data" / "chip_observations")
     monkeypatch.setattr(build_site, "EXECUTION_DIVERGENCE_DIR", root / "data" / "execution_divergence")
+    monkeypatch.setattr(build_site, "FIELD_SIMULATION_VALIDATION_DIR", root / "data" / "field_simulation_validation")
     monkeypatch.setattr(build_site, "RESULTS_DIR", root / "data" / "results")
     monkeypatch.setattr(build_site, "CALIBRATION_PATH", root / "data" / "calibration.json")
     monkeypatch.setattr(build_site, "DOCS_ROOT", root / "docs")
@@ -240,6 +241,39 @@ def test_gameweek_page_stays_silent_when_not_yet_checked(repo):
     gw_page = (repo / "docs" / "gameweek" / "gw01" / "index.html").read_text()
     assert "Execution matched" not in gw_page
     assert "Execution diverged" not in gw_page
+
+
+def test_methodology_page_shows_empty_state_when_no_field_validation_yet(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+
+    build_site.run()
+
+    methodology = (repo / "docs" / "methodology" / "index.html").read_text()
+    assert "nothing to validate yet" in methodology
+
+
+def test_methodology_page_shows_field_validation_table(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "field_simulation_validation" / "gw01.jsonl", [{
+        "schema_version": "1.0", "gameweek": 1, "predicted_field_mean_score": 52.3,
+        "naive_ownership_weighted_mean_score": 48.1, "actual_average_entry_score": 55.0,
+        "absolute_error": -2.7, "percent_error": -4.91, "prediction_record_id": "p1",
+        "checked_at_utc": "2026-08-22T09:00:00Z", "record_id": "v1",
+    }])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed + field validation")
+
+    build_site.run()
+
+    methodology = (repo / "docs" / "methodology" / "index.html").read_text()
+    assert "GW1" in methodology
+    assert "52.3" in methodology
+    assert "55.0" in methodology
+    assert "-2.7" in methodology
 
 
 def test_gameweek_page_links_to_the_commit_that_recorded_the_prediction(repo):

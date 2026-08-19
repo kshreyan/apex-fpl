@@ -31,6 +31,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(build_site, "PREDICTIONS_DIR", root / "data" / "predictions")
     monkeypatch.setattr(build_site, "TRANSFER_RECOMMENDATIONS_DIR", root / "data" / "transfer_recommendations")
     monkeypatch.setattr(build_site, "CHIP_OBSERVATIONS_DIR", root / "data" / "chip_observations")
+    monkeypatch.setattr(build_site, "EXECUTION_DIVERGENCE_DIR", root / "data" / "execution_divergence")
     monkeypatch.setattr(build_site, "RESULTS_DIR", root / "data" / "results")
     monkeypatch.setattr(build_site, "CALIBRATION_PATH", root / "data" / "calibration.json")
     monkeypatch.setattr(build_site, "DOCS_ROOT", root / "docs")
@@ -185,6 +186,60 @@ def test_missing_prediction_gap_is_permanent_on_gameweek_page_and_homepage(repo)
     home = (repo / "docs" / "index.html").read_text()
     assert "GW7" in home
     assert "pipeline gap" in home.lower() or "pipeline failure" in home.lower()
+
+
+def _divergence_record(gw, status="MATCHED", squad_diverged=False, captain_diverged=False):
+    return {
+        "schema_version": "1.0", "gameweek": gw, "entry_id": 123, "status": status,
+        "squad_diverged": squad_diverged, "captain_diverged": captain_diverged,
+        "real_squad_ids": ["1", "2", "3"], "predicted_squad_ids": ["1", "2", "3"],
+        "real_captain_id": "2", "predicted_captain_id": "2",
+        "prediction_record_id": "p1", "checked_at_utc": "2026-08-22T09:00:00Z", "record_id": "d1",
+    }
+
+
+def test_gameweek_page_shows_matched_execution(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _write_ledger(repo / "data" / "execution_divergence" / "gw01.jsonl", [_divergence_record(1, status="MATCHED")])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction + matched execution")
+
+    build_site.run()
+
+    gw_page = (repo / "docs" / "gameweek" / "gw01" / "index.html").read_text()
+    assert "Execution matched" in gw_page
+
+
+def test_gameweek_page_shows_diverged_execution_as_a_permanent_critical_notice(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _write_ledger(repo / "data" / "execution_divergence" / "gw01.jsonl", [_divergence_record(1, status="DIVERGED", squad_diverged=True)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction + diverged execution")
+
+    build_site.run()
+
+    gw_page = (repo / "docs" / "gameweek" / "gw01" / "index.html").read_text()
+    assert "Execution diverged" in gw_page
+    assert "manual execution failure" in gw_page
+    assert "the 15-man squad differs" in gw_page
+
+
+def test_gameweek_page_stays_silent_when_not_yet_checked(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction, no divergence check yet")
+
+    build_site.run()
+
+    gw_page = (repo / "docs" / "gameweek" / "gw01" / "index.html").read_text()
+    assert "Execution matched" not in gw_page
+    assert "Execution diverged" not in gw_page
 
 
 def test_gameweek_page_links_to_the_commit_that_recorded_the_prediction(repo):

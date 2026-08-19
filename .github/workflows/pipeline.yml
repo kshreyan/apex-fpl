@@ -206,6 +206,23 @@ jobs:
         if: steps.gate.outputs.should_run == 'true'
         run: python -m pipeline.score
 
+      - name: Run check_execution_divergence.py
+        # Same never-blocks-the-pipeline discipline as predict_transfers.py
+        # and predict_chips.py above -- checking a settled gameweek's real
+        # entry picks against what was published must not cost the site
+        # build if it has a bug. Runs alongside score.py: both act only on
+        # already-settled gameweeks, not on this run's live deadline.
+        if: steps.gate.outputs.should_run == 'true'
+        run: |
+          set +e
+          python -m pipeline.check_execution_divergence
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::warning title=Execution-divergence check failed::check_execution_divergence.py exited $code -- scoring and the site build above are unaffected. See the step log."
+          fi
+          exit 0
+
       - name: Rebuild data/calibration.json
         if: steps.gate.outputs.should_run == 'true'
         run: python -m pipeline.metrics

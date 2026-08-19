@@ -59,6 +59,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
 TRANSFER_RECOMMENDATIONS_DIR = REPO_ROOT / "data" / "transfer_recommendations"
 CHIP_OBSERVATIONS_DIR = REPO_ROOT / "data" / "chip_observations"
+EXECUTION_DIVERGENCE_DIR = REPO_ROOT / "data" / "execution_divergence"
 RESULTS_DIR = REPO_ROOT / "data" / "results"
 CALIBRATION_PATH = REPO_ROOT / "data" / "calibration.json"
 DOCS_ROOT = REPO_ROOT / "docs"
@@ -127,6 +128,16 @@ def _all_chip_observations() -> dict[str, list[dict]]:
     if not CHIP_OBSERVATIONS_DIR.exists():
         return {}
     return {p.stem: _read_ledger_lines(p) for p in sorted(CHIP_OBSERVATIONS_DIR.glob("*.jsonl"))}
+
+
+def _all_execution_divergence() -> dict[int, dict]:
+    """One record per gameweek, written at most once (see
+    pipeline/check_execution_divergence.py's own docstring on why a
+    checked gameweek is never re-checked) -- a gameweek missing here
+    simply hasn't been checked yet, not a MATCHED result."""
+    if not EXECUTION_DIVERGENCE_DIR.exists():
+        return {}
+    return {int(p.stem[2:]): _read_ledger_lines(p)[-1] for p in sorted(EXECUTION_DIVERGENCE_DIR.glob("gw*.jsonl")) if _read_ledger_lines(p)}
 
 
 def _url(path: str) -> str:
@@ -212,6 +223,35 @@ def _gw_status(gw: int, prediction: dict | None, result: dict | None, is_missing
     if result["status"] == "BLANK_GAMEWEEK_NO_SCORING":
         return "BLANK_GAMEWEEK", "muted"
     return result["status"], "muted"
+
+
+def _execution_divergence_section(divergence: dict | None) -> Raw:
+    """CLAUDE.md's "real FPL entry: execution is human-in-the-loop"
+    rule, second half -- a settled gameweek's real entry picks compared
+    against what was published, shown the same way a missing prediction
+    already is: as a permanent fact, not corrected or reconciled.
+    `divergence` is None when the gameweek hasn't been checked yet
+    (nothing to show, not a MATCHED result)."""
+    if divergence is None:
+        return raw("")
+    if divergence["status"] == "MATCHED":
+        return raw(
+            f'<p class="commit-proof">{_status_badge("Execution matched", "good")} '
+            "The real FPL entry's actual picks for this gameweek matched what was published.</p>"
+        )
+    reasons = []
+    if divergence["squad_diverged"]:
+        reasons.append("the 15-man squad differs")
+    if divergence["captain_diverged"]:
+        reasons.append("the captain differs")
+    return raw(
+        '<div class="notice notice-critical" role="note">'
+        f'{_status_badge("Execution diverged", "critical")} '
+        "<div>The real FPL entry's actual picks for this gameweek diverged from what was published "
+        f"({esc(' and '.join(reasons))}) — a manual execution failure (the transfer or lineup wasn't "
+        "entered in time, or was entered differently), not a model decision. This is a permanent "
+        "record, not corrected or reconciled.</div></div>"
+    )
 
 
 def _squad_table(squad: dict) -> Raw:
@@ -581,7 +621,8 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
 
 
 def build_gameweek_page(gw: int, prediction: dict | None, result: dict | None, is_missing: bool,
-                         pred_commit_url: str | None, result_commit_url: str | None, rebuilt_at_utc: str) -> str:
+                         pred_commit_url: str | None, result_commit_url: str | None, rebuilt_at_utc: str,
+                         divergence: dict | None = None) -> str:
     status, kind = _gw_status(gw, prediction, result, is_missing)
     parts = [f"<h1>Gameweek {gw}</h1>", str(_status_badge(status.replace("_", " ").title(), kind))]
 
@@ -626,6 +667,8 @@ def build_gameweek_page(gw: int, prediction: dict | None, result: dict | None, i
             )
         elif prediction["status"] != "BLANK_GAMEWEEK":
             parts.append('<p class="pending">Not yet scored — this gameweek has not settled.</p>')
+
+        parts.append(str(_execution_divergence_section(divergence)))
 
     body = raw("".join(parts))
     return _page(f"Gameweek {gw}", f"APEX FPL's prediction and result for gameweek {gw}.", "", body, rebuilt_at_utc)
@@ -871,6 +914,7 @@ def run() -> None:
     results = _all_results()
     transfer_recommendations = _all_transfer_recommendations()
     chip_observations = _all_chip_observations()
+    execution_divergence = _all_execution_divergence()
     rebuilt_at_utc = calibration["rebuilt_at_utc"]
 
     _write(DOCS_ROOT / "index.html", build_homepage(calibration, predictions, results))
@@ -886,7 +930,7 @@ def run() -> None:
         result = result_lines[-1] if result_lines else None
         pred_commit_url = _commit_link_for_latest(PREDICTIONS_DIR, gw, pred_lines) if pred_lines else None
         result_commit_url = _commit_link_for_latest(RESULTS_DIR, gw, result_lines) if result_lines else None
-        page = build_gameweek_page(gw, prediction, result, gw in missing, pred_commit_url, result_commit_url, rebuilt_at_utc)
+        page = build_gameweek_page(gw, prediction, result, gw in missing, pred_commit_url, result_commit_url, rebuilt_at_utc, execution_divergence.get(gw))
         _write(DOCS_ROOT / "gameweek" / f"gw{gw:02d}" / "index.html", page)
 
     _write(DOCS_ROOT / "assets" / "site.css", SITE_CSS)

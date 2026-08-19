@@ -69,14 +69,21 @@ Two standing rules, decided before GW1, not after:
   prediction`'s rendering is the existing precedent this follows). This
   rule was written down before the squad-state reader existed,
   specifically so it couldn't be quietly softened once that piece
-  landed. **Status as of Block 2.5:** `apex_fpl.serving.entry_state` now
-  reads the real entry's actual squad each settled gameweek (public API,
-  no credentials) and feeds it into the transfer recommendation
-  (`pipeline/predict_transfers.py`) — but it does not yet COMPARE that
-  real squad against what `predict.py` published for the same gameweek,
-  or render a divergence on the site. The reader exists; the
-  divergence-detection-and-display half of this rule is still real,
-  undone work, not silently completed by the reader's existence.
+  landed. **Status as of the multi-gameweek/chip/divergence build:**
+  `apex_fpl.serving.entry_state` reads the real entry's actual squad
+  each settled gameweek (public API, no credentials) and feeds it into
+  the transfer recommendation (`pipeline/predict_transfers.py`).
+  `pipeline/check_execution_divergence.py` now closes the other half:
+  once a gameweek settles, it compares the real entry's actual picks
+  (squad as a set of 15 IDs + captain ID) against what `predict.py`
+  published for that same gameweek, checked exactly once per gameweek
+  and never re-checked (`data/execution_divergence/gw{n:02d}.jsonl`),
+  and `pipeline/build_site.py::build_gameweek_page` renders the result
+  — a quiet "Execution matched" note, or a permanent critical notice on
+  divergence. Wired into `pipeline.yml` as a best-effort step (same
+  never-blocks-the-pipeline discipline as `predict_transfers.py` and
+  `predict_chips.py`), alongside `score.py` since both act only on
+  already-settled gameweeks.
 
 ## Data taxonomy
 

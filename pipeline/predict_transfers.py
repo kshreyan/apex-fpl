@@ -22,19 +22,21 @@ returning None is a real, expected, common state for a large part of
 this project's life this season (all of GW1) — recorded as a
 NO_SETTLED_GAMEWEEK_YET status, not treated as a failure.
 
-**Scope, disclosed here and in every record's caveats, not just in a
-report:** this first version uses `horizon=1` (myopic single-gameweek
-lookahead), not the `horizon>=4` lookahead policy Phase 7 decisively
-validated as superior across 4 independent seasons
-(docs/phase7_multiweek_optimizer_report.md). horizon=1 still has its
-own real, statistically significant evidence ("transfers help at all,
-even myopically" — the same report's other confirmed finding) — but is
-not the strongest validated policy. Extending to a genuine multi-
-gameweek horizon needs a live multi-gameweek-ahead EP forecasting
-pipeline (repeating the team/minutes/attacking models forward across
-future fixtures) that doesn't exist yet — real, separate, undone work,
-not implemented here to avoid shipping something untested this close to
-a deadline.
+**Scope: HORIZON=4 lookahead, matching Phase 7's own validated
+configuration exactly** (docs/phase7_multiweek_optimizer_report.md's
+extended, 4-independent-season confirmation — SHORTLIST_PER_POSITION=15,
+TIME_LIMIT=60.0 reused unchanged from scripts/run_phase7_multi_season_
+replay.py, not re-picked here). Previously myopic (horizon=1) pending
+apex_fpl.serving.gameweek_history-style live multi-gameweek forecasting
+-- that foundation now exists (scripts/run_production_recommendation.
+build_multi_gameweek_forecasts, verified against real live data: a
+player's forecast EP genuinely varies week to week with their real
+opponent difficulty, not a static repeated number). A future gameweek
+within the horizon that turns out blank (no fixtures at all) is treated
+as 0.0 EP for every player that week, matching apex_fpl.optimization.
+transfers.rolling_horizon_transfers' own documented handling of a blank
+gameweek inside its window -- not a crash, and not silently dropping
+that gameweek from the horizon's transfer-timing logic.
 """
 from __future__ import annotations
 
@@ -58,7 +60,9 @@ LEDGER_DIR = REPO_ROOT / "data" / "transfer_recommendations"
 
 SCHEMA_VERSION = "1.0"
 MIN_HOURS_BEFORE_DEADLINE = 2.0
-HORIZON = 1  # myopic -- see module docstring's "Scope" section
+HORIZON = 4  # matches Phase 7's own validated configuration -- see module docstring's "Scope" section
+SHORTLIST_PER_POSITION = 15
+TIME_LIMIT = 60.0
 HIT_COST = -4.0
 MAX_FREE_TRANSFERS = 5
 
@@ -132,10 +136,10 @@ def _build_published_record(target_gw: int, squad_state: es.CurrentSquadState, p
             "paid_transfers": plan_step.paid_transfers,
             "hit_points": plan_step.hit_points,
             "bank_after": round(plan_step.bank_after, 1),
-            "net_expected_points_this_gw": None,  # see caveats: horizon=1 net EP isn't separately meaningful beyond hit_points, already captured above
+            "net_expected_points_this_gw": None,  # the plan's total_net_expected_points spans the whole horizon, not just this gameweek -- not separately meaningful sliced to one week
         },
         "caveats": [
-            "horizon=1 (myopic single-gameweek lookahead), not the horizon>=4 policy Phase 7 decisively validated as stronger across 4 independent seasons -- real evidence exists for myopic too (transfers help at all), just not the strongest validated policy. See module docstring.",
+            f"horizon={HORIZON}, matching Phase 7's own validated configuration exactly (docs/phase7_multiweek_optimizer_report.md) -- only this gameweek's own transfer is committed, per the receding-horizon pattern that report specifies; the rest of the plan is discarded and re-solved fresh next gameweek with updated forecasts.",
             "Sell prices are approximated as each player's CURRENT price, not their true purchase-price-adjusted value (FPL keeps only 50% of a price rise since purchase on sale) -- this can slightly overstate the money freed by selling a player who has risen in price. See apex_fpl.serving.entry_state's module docstring.",
         ],
     }
@@ -186,22 +190,40 @@ def run(dry_run: bool = False) -> int:
 
     print(f"Real squad as of GW{squad_state.as_of_gw}: {len(squad_state.squad_ids)} players, bank={squad_state.bank}, free_transfers={squad_state.free_transfers}")
 
-    print("--- Building this gameweek's expected-points forecast for the full live pool ---")
-    from run_production_recommendation import build_player_forecasts
-    forecasts = build_player_forecasts(target_gw, log=print)
-    sim_results = forecasts["sim_results"]
-    candidates_meta = forecasts["candidates_meta"]
+    print(f"--- Building a {HORIZON}-gameweek expected-points forecast for the full live pool ---")
+    from run_production_recommendation import build_multi_gameweek_forecasts
+    forecasts = build_multi_gameweek_forecasts(target_gw, horizon=HORIZON, log=print)
 
-    horizon_players = [
-        tr.HorizonPlayer(player_id=pid, position=m["position"], team=m["team"], price=m["price"], ep_by_gw=(sim_results[pid].mean_points,))
-        for pid, m in candidates_meta.items() if pid in sim_results
-    ]
+    if forecasts[target_gw] is None:
+        print(f"GW{target_gw} itself has no fixtures (a blank gameweek) — no transfer decision is possible.")
+        record = _build_status_record(target_gw, "BLANK_GAMEWEEK", f"GW{target_gw} has zero fixtures", prior_record)
+        return _finalize(record, ledger_path, dry_run)
 
-    print("--- Solving the transfer plan (horizon=1) ---")
+    candidates_meta = forecasts[target_gw]["candidates_meta"]
+    all_ids = set(candidates_meta) | set(squad_state.squad_ids)
+    horizon_players = []
+    for pid in all_ids:
+        meta = candidates_meta.get(pid)
+        if meta is None:
+            # a currently-owned player absent from THIS gameweek's own live
+            # pool entirely (e.g. dropped from the game) -- still a real
+            # squad slot needing a price/position for the MILP, recovered
+            # from whichever horizon gameweek's pool it DOES appear in.
+            meta = next((forecasts[gw]["candidates_meta"][pid] for gw in forecasts if forecasts[gw] and pid in forecasts[gw]["candidates_meta"]), None)
+            if meta is None:
+                continue  # never appears anywhere in the horizon -- cannot be priced or positioned, must be excluded
+        ep_by_gw = tuple(
+            forecasts[gw]["sim_results"][pid].mean_points if forecasts[gw] and pid in forecasts[gw]["sim_results"] else 0.0
+            for gw in sorted(forecasts)
+        )
+        horizon_players.append(tr.HorizonPlayer(player_id=pid, position=meta["position"], team=meta["team"], price=meta["price"], ep_by_gw=ep_by_gw))
+
+    print(f"--- Solving the transfer plan (horizon={HORIZON}) ---")
     plan = tr.plan_transfers(
         current_squad_ids=squad_state.squad_ids, sell_price_by_id=squad_state.sell_price_by_id,
         bank=squad_state.bank, free_transfers=squad_state.free_transfers,
         players=horizon_players, horizon=HORIZON, hit_cost=HIT_COST, max_free_transfers=MAX_FREE_TRANSFERS,
+        time_limit=TIME_LIMIT, shortlist_per_position=SHORTLIST_PER_POSITION,
     )
     step = plan.gameweeks[0]
     if step.transfers_in:

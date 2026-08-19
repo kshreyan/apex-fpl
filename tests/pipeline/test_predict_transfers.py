@@ -1,10 +1,11 @@
 """Offline coverage of predict_transfers.py's OWN responsibilities:
 phase gating, the NO_SETTLED_GAMEWEEK_YET / SKIPPED_INCONSISTENT_STATE /
-PUBLISHED branches, record shape, supersede chaining, dry-run. The real
-squad optimizer (apex_fpl.optimization.transfers.plan_transfers) and the
-EP-forecast pipeline (run_production_recommendation.build_player_forecasts)
-are mocked out -- their own correctness is tested elsewhere; this file
-only tests this module's wiring and ledger discipline.
+BLANK_GAMEWEEK / PUBLISHED branches, record shape, supersede chaining,
+dry-run. The real squad optimizer (apex_fpl.optimization.transfers.
+plan_transfers) and the multi-gameweek EP-forecast pipeline
+(run_production_recommendation.build_multi_gameweek_forecasts) are
+mocked out -- their own correctness is tested elsewhere; this file only
+tests this module's wiring and ledger discipline.
 """
 from __future__ import annotations
 
@@ -47,13 +48,23 @@ def _install_tmp_dirs(monkeypatch, tmp_path):
 NOW_EVENT_FUTURE = "2026-08-21T17:30:00Z"
 
 
-def _fake_forecasts():
+class _FakePlayerSimResult:
+    def __init__(self, mean_points):
+        self.mean_points = mean_points
+
+
+def _fake_multi_gw_forecasts(target_gw, horizon):
+    """A minimal HORIZON-keyed forecast dict, matching build_multi_gameweek_
+    forecasts' real shape -- plan_transfers itself is mocked in tests that
+    need it, so the exact EP values here are only used to prove they were
+    threaded through correctly (see test_published_record_reflects_the_solved_plan)."""
+    candidates_meta = {
+        "1": {"name": "Player One", "team": "Arsenal", "position": "DEF", "price": 5.0, "availability_probability": 1.0},
+        "2": {"name": "Player Two", "team": "Chelsea", "position": "MID", "price": 8.0, "availability_probability": 1.0},
+    }
     return {
-        "sim_results": {},  # unused by predict_transfers directly beyond building horizon_players; plan_transfers itself is mocked below
-        "candidates_meta": {
-            "1": {"name": "Player One", "team": "Arsenal", "position": "DEF", "price": 5.0, "availability_probability": 1.0},
-            "2": {"name": "Player Two", "team": "Chelsea", "position": "MID", "price": 8.0, "availability_probability": 1.0},
-        },
+        gw: {"candidates_meta": candidates_meta, "sim_results": {"1": _FakePlayerSimResult(4.0 + gw), "2": _FakePlayerSimResult(5.0 + gw)}}
+        for gw in range(target_gw, target_gw + horizon)
     }
 
 
@@ -121,6 +132,31 @@ def test_inconsistent_settled_gameweek_is_skipped_not_guessed(monkeypatch, tmp_p
     assert "3" in record["detail"] and "1" in record["detail"]
 
 
+def test_blank_target_gameweek_writes_a_status_record_without_solving_anything(monkeypatch, tmp_path):
+    """target_gw itself has no fixtures at all -- build_multi_gameweek_
+    forecasts maps that to None for that gw (see run_production_
+    recommendation.simulate_gameweek_ep's own contract), and this module
+    must record that plainly rather than crash or misreport a plan."""
+    _install_tmp_dirs(monkeypatch, tmp_path)
+    bs = make_bootstrap_static([make_event(1, NOW_EVENT_FUTURE, is_next=True)])
+    fixtures = [make_fixture(1, 1, team_h=1, team_a=2, kickoff_time=NOW_EVENT_FUTURE)]
+    _install_fake_network(monkeypatch, bs, fixtures)
+    state = es.CurrentSquadState(squad_ids=["1"], bank=0.5, free_transfers=1, sell_price_by_id={"1": 5.0}, as_of_gw=0)
+    monkeypatch.setattr(pt.es, "build_current_squad_state", lambda now_cost_by_element: state)
+    monkeypatch.setattr(rpr, "build_multi_gameweek_forecasts", lambda gw, horizon, log=None: {g: None for g in range(gw, gw + horizon)})
+
+    def _explode(*a, **k):
+        raise AssertionError("plan_transfers must never be called for a blank target gameweek")
+    monkeypatch.setattr(pt.tr, "plan_transfers", _explode)
+
+    exit_code = pt.run()
+
+    assert exit_code == pt.EXIT_OK
+    record = json.loads((tmp_path / "transfer_recommendations" / "gw01.jsonl").read_text().splitlines()[0])
+    assert record["status"] == "BLANK_GAMEWEEK"
+    assert record["recommendation"] is None
+
+
 def test_published_record_reflects_the_solved_plan(monkeypatch, tmp_path):
     _install_tmp_dirs(monkeypatch, tmp_path)
     bs = make_bootstrap_static([make_event(1, NOW_EVENT_FUTURE, is_next=True)])
@@ -128,7 +164,7 @@ def test_published_record_reflects_the_solved_plan(monkeypatch, tmp_path):
     _install_fake_network(monkeypatch, bs, fixtures)
     state = es.CurrentSquadState(squad_ids=["1"], bank=0.5, free_transfers=1, sell_price_by_id={"1": 5.0}, as_of_gw=0)
     monkeypatch.setattr(pt.es, "build_current_squad_state", lambda now_cost_by_element: state)
-    monkeypatch.setattr(rpr, "build_player_forecasts", lambda gw, log=None: _fake_forecasts())
+    monkeypatch.setattr(rpr, "build_multi_gameweek_forecasts", lambda gw, horizon, log=None: _fake_multi_gw_forecasts(gw, horizon))
 
     fake_step = tr.GameweekPlan(
         gw_index=0, squad=["2"], starters=["2"], captain="2", bench_order=[],
@@ -148,7 +184,7 @@ def test_published_record_reflects_the_solved_plan(monkeypatch, tmp_path):
     assert rec["transfers_out"] == [{"player_id": "1", "name": "Player One", "position": "DEF", "team": "Arsenal"}]
     assert rec["hit_points"] == 0.0
     assert rec["bank_after"] == -2.5
-    assert any("horizon=1" in c for c in record["caveats"])
+    assert any("horizon=4" in c for c in record["caveats"])
 
 
 def test_second_run_supersedes_the_first(monkeypatch, tmp_path):

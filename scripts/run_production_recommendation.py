@@ -219,15 +219,37 @@ def build_player_forecasts(target_gw: int, log=lambda msg: None) -> dict:
     teams_with_double_fixture, in_season_mode, settled_gw_count,
     caveats, team_fixtures, cold_start_rows, total_sims.
     """
+    shared = fit_shared_models(target_gw, log=log)
+    per_gw = simulate_gameweek_ep(shared, target_gw, log=log)
+    if per_gw is None:
+        raise ValueError(f"no live fixtures found for GW{target_gw} — check the Bronze snapshot is current")
+
+    return {
+        "sim_results": per_gw["sim_results"], "candidates_meta": per_gw["candidates_meta"],
+        "fixture_meta": per_gw["fixture_meta"], "teams_with_double_fixture": per_gw["teams_with_double_fixture"],
+        "in_season_mode": per_gw["in_season_mode"], "settled_gw_count": per_gw["settled_gw_count"],
+        "caveats": per_gw["caveats"], "team_fixtures": shared["team_fixtures"],
+        "cold_start_rows": shared["cold_start_rows"], "total_sims": per_gw["total_sims"],
+    }
+
+
+def fit_shared_models(target_gw: int, log=lambda msg: None) -> dict:
+    """The part of build_player_forecasts() that does NOT depend on
+    which specific gameweek is being scored -- the team model, the
+    minutes/attacking mode decision (cold-start vs in-season) and
+    whatever real history feeds it, and the live player roster. Fit
+    ONCE and reused across every gameweek in a multi-gameweek horizon
+    (Block 2's Wildcard/lookahead-transfer work) rather than refit per
+    horizon week: the real settled history available is exactly
+    `target_gw`'s own cutoff regardless of which FUTURE gameweek is
+    being forecast, since none of those future gameweeks have happened
+    yet -- there is no more history to have "by" gameweek t+3 than
+    there is right now.
+    """
     log(f"--- Fitting team model (live + 2024-25 fallback fixtures) ---")
     team_fixtures = ld.build_team_model_fixtures(fallback_seasons=TEAM_MODEL_FALLBACK_SEASONS)
     team_model = ad.fit(team_fixtures)
     log(f"Team model fit on {len(team_fixtures)} fixtures (earliest {team_fixtures[0].date.date()}, latest {team_fixtures[-1].date.date()})")
-
-    target_fixtures = ld.load_target_gw_fixtures(target_gw)
-    if not target_fixtures:
-        raise ValueError(f"no live fixtures found for GW{target_gw} — check the Bronze snapshot is current")
-    log(f"GW{target_gw}: {len(target_fixtures)} fixtures\n")
 
     log("--- Fitting cold-start minutes model (real historical GW1 data, 4 seasons) ---")
     cold_start_rows = load_cold_start_minutes_rows()
@@ -248,6 +270,33 @@ def build_player_forecasts(target_gw: int, log=lambda msg: None) -> dict:
         goals_assists_history = gwh.goals_assists_history_by_code(deltas)
     else:
         log(f"--- Only {settled_gw_count} settled gameweek(s) reconstructed (< {IN_SEASON_TRANSITION_MIN_SETTLED_GWS}) -- staying on cold-start models ---\n")
+
+    return {
+        "team_model": team_model, "team_fixtures": team_fixtures,
+        "minutes_model": minutes_model, "cold_start_rows": cold_start_rows,
+        "players": players, "settled_gw_count": settled_gw_count, "in_season_mode": in_season_mode,
+        "minutes_history": minutes_history, "goals_assists_history": goals_assists_history,
+    }
+
+
+def simulate_gameweek_ep(shared: dict, gw: int, log=lambda msg: None) -> dict | None:
+    """Given `fit_shared_models`'s output, computes per-player expected
+    points for ONE specific gameweek `gw` (any gameweek with real
+    fixtures on file, not necessarily the immediate next one --
+    `apex_fpl.serving.live_data.load_target_gw_fixtures` already reads
+    the whole season's real fixture calendar, confirmed live). Returns
+    None for a blank gameweek (no fixtures) rather than raising --
+    callers forecasting a multi-gameweek horizon need to handle a blank
+    week gracefully mid-horizon, not abort the whole forecast."""
+    team_model, players = shared["team_model"], shared["players"]
+    in_season_mode, minutes_model = shared["in_season_mode"], shared["minutes_model"]
+    minutes_history, goals_assists_history = shared["minutes_history"], shared["goals_assists_history"]
+    settled_gw_count = shared["settled_gw_count"]
+
+    target_fixtures = ld.load_target_gw_fixtures(gw)
+    if not target_fixtures:
+        return None
+    log(f"GW{gw}: {len(target_fixtures)} fixtures\n")
 
     # team_expected_goals sums ALL of a team's fixtures this gameweek -- used
     # to compute each player's POOLED expected_goals/expected_assists (see
@@ -345,6 +394,7 @@ def build_player_forecasts(target_gw: int, log=lambda msg: None) -> dict:
         )
 
     return {
+        "gw": gw,
         "sim_results": sim_results,
         "candidates_meta": candidates_meta,
         "fixture_meta": fixture_meta,
@@ -352,10 +402,28 @@ def build_player_forecasts(target_gw: int, log=lambda msg: None) -> dict:
         "in_season_mode": in_season_mode,
         "settled_gw_count": settled_gw_count,
         "caveats": caveats,
-        "team_fixtures": team_fixtures,
-        "cold_start_rows": cold_start_rows,
         "total_sims": total_sims,
     }
+
+
+def build_multi_gameweek_forecasts(target_gw: int, horizon: int, log=lambda msg: None) -> dict[int, dict | None]:
+    """Fits the shared models ONCE (see fit_shared_models's own
+    docstring for why that's correct, not just an optimization), then
+    computes per-player expected points for each of `horizon`
+    consecutive real gameweeks starting at `target_gw` -- the shared
+    foundation Wildcard valuation and multi-gameweek transfer lookahead
+    both need (Phase 13, the items this project's own promotion
+    schedule listed as blocked on "a live multi-gameweek-ahead EP
+    forecasting pipeline that doesn't exist yet"). A blank gameweek
+    anywhere in the horizon maps to None, not a crash -- callers must
+    handle a missing entry (e.g. treat it as a genuinely blank week
+    worth 0 EP for every player, matching how the rest of this project
+    already treats blank gameweeks)."""
+    shared = fit_shared_models(target_gw, log=log)
+    forecasts: dict[int, dict | None] = {}
+    for gw in range(target_gw, target_gw + horizon):
+        forecasts[gw] = simulate_gameweek_ep(shared, gw, log=log)
+    return forecasts
 
 
 def generate_recommendation(target_gw: int, verbose: bool = True, write_artifact: bool = True) -> dict:

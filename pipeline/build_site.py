@@ -61,6 +61,7 @@ TRANSFER_RECOMMENDATIONS_DIR = REPO_ROOT / "data" / "transfer_recommendations"
 CHIP_OBSERVATIONS_DIR = REPO_ROOT / "data" / "chip_observations"
 EXECUTION_DIVERGENCE_DIR = REPO_ROOT / "data" / "execution_divergence"
 FIELD_SIMULATION_VALIDATION_DIR = REPO_ROOT / "data" / "field_simulation_validation"
+RANK_AWARE_PREDICTIONS_DIR = REPO_ROOT / "data" / "rank_aware_predictions"
 RESULTS_DIR = REPO_ROOT / "data" / "results"
 CALIBRATION_PATH = REPO_ROOT / "data" / "calibration.json"
 DOCS_ROOT = REPO_ROOT / "docs"
@@ -116,6 +117,12 @@ def _all_transfer_recommendations() -> dict[int, list[dict]]:
     if not TRANSFER_RECOMMENDATIONS_DIR.exists():
         return {}
     return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(TRANSFER_RECOMMENDATIONS_DIR.glob("gw*.jsonl"))}
+
+
+def _all_rank_aware_predictions() -> dict[int, list[dict]]:
+    if not RANK_AWARE_PREDICTIONS_DIR.exists():
+        return {}
+    return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(RANK_AWARE_PREDICTIONS_DIR.glob("gw*.jsonl"))}
 
 
 CHIP_DISPLAY_NAMES = {"bboost": "Bench Boost", "3xc": "Triple Captain", "freehit": "Free Hit", "wildcard": "Wildcard"}
@@ -588,9 +595,61 @@ def _this_weeks_action_section(gw: int, transfer_recommendations: dict[int, list
     )
 
 
+def _rank_aware_section(gw: int, rank_aware_predictions: dict[int, list[dict]]) -> Raw:
+    """Item 3 of the "explicitly disclosed, not built" gaps
+    (apex_fpl.optimization.rank_aware) — an ownership-differential
+    alternative to the max-EV squad, scored against a live synthetic
+    field for probability of a top-decile finish rather than raw
+    expected points. Explicitly informational, not a recommendation
+    (see that module's own docstring) — silent when there's no
+    published prediction for this gameweek yet."""
+    lines = rank_aware_predictions.get(gw)
+    if not lines or lines[-1]["status"] != "PUBLISHED":
+        return raw("")
+    record = lines[-1]
+    selected = record["selected"]
+    candidates = record["candidates"]
+    max_ev_candidate = candidates[0]
+
+    if selected["label"] == "max_ev":
+        summary = "<p>No ownership-differential alternative beat the max-EV squad on this metric this gameweek — the max-EV squad is also the rank-aware pick.</p>"
+    else:
+        ev_traded = round(max_ev_candidate["mean_ev"] - selected["mean_ev"], 2)
+        p_before = round(max_ev_candidate["p_top10pct"] * 100, 1)
+        p_after = round(selected["p_top10pct"] * 100, 1)
+        summary = (
+            f"<p>Swapping <strong>{esc(selected['swapped_out']['name'])}</strong> for "
+            f"<strong>{esc(selected['swapped_in']['name'])}</strong> trades {esc(ev_traded)} expected points "
+            f"for a rise in P(top 10% of the field) from {esc(p_before)}% to {esc(p_after)}%.</p>"
+        )
+
+    def _row(c: dict) -> str:
+        return (
+            f"<tr><td>{esc(c['label'])}</td><td>{esc(c['mean_ev'])}</td>"
+            f"<td>{esc(round(c['p_top10pct'] * 100, 1))}%</td><td>{esc(round(c['mean_percentile'] * 100, 1))}%</td></tr>"
+        )
+    rows = "".join(_row(c) for c in candidates)
+    table = (
+        '<table class="data-table"><caption>Candidate squads scored against a live synthetic field</caption>'
+        "<thead><tr><th>Candidate</th><th>Mean EV</th><th>P(top 10%)</th><th>Mean percentile</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+    return raw(
+        '<section aria-labelledby="rank-aware-heading">'
+        '<h2 id="rank-aware-heading">Rank-aware alternative (experimental)</h2>'
+        '<p class="section-note">Informational only, not a recommendation: an alternative squad chosen to '
+        "maximize the probability of a top-decile finish against a live synthetic field, not just raw expected "
+        "points. See the methodology page for how this differs from the squad above.</p>"
+        f"{summary}{table}"
+        "</section>"
+    )
+
+
 def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
                         transfer_recommendations: dict[int, list[dict]] | None = None,
-                        chip_observations: dict[str, list[dict]] | None = None) -> str:
+                        chip_observations: dict[str, list[dict]] | None = None,
+                        rank_aware_predictions: dict[int, list[dict]] | None = None) -> str:
     record = _record_summary_fragment(calibration)
     caveat = _squad_recomputation_caveat()
     if not predictions:
@@ -620,6 +679,7 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
     # section's own docstring for why it's silent when there's nothing
     # actionable yet (the common case for most of the season so far).
     action_section = _this_weeks_action_section(gw, transfer_recommendations or {}, chip_observations or {})
+    rank_aware_section = _rank_aware_section(gw, rank_aware_predictions or {})
 
     body = raw(
         f"{record}"
@@ -632,6 +692,7 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
         'not a transfer plan. If a recommended action is shown above, that is the actual thing to do this week, '
         "not this squad.</p>"
         f"{picks_html}"
+        f"{rank_aware_section}"
     )
     return _page("This week", "This week's live FPL picks from APEX FPL.", "/current/", body, calibration["rebuilt_at_utc"])
 
@@ -967,10 +1028,11 @@ def run() -> None:
     chip_observations = _all_chip_observations()
     execution_divergence = _all_execution_divergence()
     field_simulation_validation = _all_field_simulation_validation()
+    rank_aware_predictions = _all_rank_aware_predictions()
     rebuilt_at_utc = calibration["rebuilt_at_utc"]
 
     _write(DOCS_ROOT / "index.html", build_homepage(calibration, predictions, results))
-    _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions, transfer_recommendations, chip_observations))
+    _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions, transfer_recommendations, chip_observations, rank_aware_predictions))
     _write(DOCS_ROOT / "methodology" / "index.html", build_methodology_page(rebuilt_at_utc, field_simulation_validation))
 
     missing = set(calibration["coverage"]["gameweeks_missing_prediction"] or [])

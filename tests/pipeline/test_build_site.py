@@ -33,6 +33,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(build_site, "CHIP_OBSERVATIONS_DIR", root / "data" / "chip_observations")
     monkeypatch.setattr(build_site, "EXECUTION_DIVERGENCE_DIR", root / "data" / "execution_divergence")
     monkeypatch.setattr(build_site, "FIELD_SIMULATION_VALIDATION_DIR", root / "data" / "field_simulation_validation")
+    monkeypatch.setattr(build_site, "RANK_AWARE_PREDICTIONS_DIR", root / "data" / "rank_aware_predictions")
     monkeypatch.setattr(build_site, "RESULTS_DIR", root / "data" / "results")
     monkeypatch.setattr(build_site, "CALIBRATION_PATH", root / "data" / "calibration.json")
     monkeypatch.setattr(build_site, "DOCS_ROOT", root / "docs")
@@ -197,6 +198,70 @@ def _divergence_record(gw, status="MATCHED", squad_diverged=False, captain_diver
         "real_captain_id": "2", "predicted_captain_id": "2",
         "prediction_record_id": "p1", "checked_at_utc": "2026-08-22T09:00:00Z", "record_id": "d1",
     }
+
+
+def _rank_aware_candidate(label, mean_ev, p_top10pct, mean_percentile=0.5, swapped_out=None, swapped_in=None):
+    return {
+        "label": label, "mean_ev": mean_ev, "mean_simulated_score": mean_ev, "mean_percentile": mean_percentile,
+        "p_top10pct": p_top10pct, "p_top25pct": p_top10pct * 1.5,
+        "swapped_out": {"player_id": swapped_out, "name": "Old Guy", "position": "MID", "team": "Arsenal"} if swapped_out else None,
+        "swapped_in": {"player_id": swapped_in, "name": "New Guy", "position": "MID", "team": "Chelsea"} if swapped_in else None,
+        "squad": [],
+    }
+
+
+def test_current_page_shows_a_winning_rank_aware_differential(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    max_ev = _rank_aware_candidate("max_ev", mean_ev=50.0, p_top10pct=0.20)
+    diff = _rank_aware_candidate("differential_0", mean_ev=48.0, p_top10pct=0.30, swapped_out="1", swapped_in="2")
+    _write_ledger(repo / "data" / "rank_aware_predictions" / "gw01.jsonl", [{
+        "record_id": "r1", "gameweek": 1, "status": "PUBLISHED", "target_metric": "p_top10pct",
+        "candidates": [max_ev, diff], "selected": diff,
+    }])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction + rank-aware differential")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Rank-aware alternative" in current
+    assert "Old Guy" in current
+    assert "New Guy" in current
+    assert "20.0%" in current and "30.0%" in current
+
+
+def test_current_page_shows_max_ev_as_the_rank_aware_pick_when_no_differential_wins(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    max_ev = _rank_aware_candidate("max_ev", mean_ev=50.0, p_top10pct=0.30)
+    _write_ledger(repo / "data" / "rank_aware_predictions" / "gw01.jsonl", [{
+        "record_id": "r1", "gameweek": 1, "status": "PUBLISHED", "target_metric": "p_top10pct",
+        "candidates": [max_ev], "selected": max_ev,
+    }])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction, no rank-aware win")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Rank-aware alternative" in current
+    assert "no ownership-differential alternative beat the max-ev squad" in current.lower()
+
+
+def test_current_page_shows_nothing_rank_aware_when_no_ledger_exists(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction only")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Rank-aware alternative" not in current
 
 
 def test_gameweek_page_shows_matched_execution(repo):

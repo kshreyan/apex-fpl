@@ -175,6 +175,24 @@ jobs:
           fi
           exit 0
 
+      - name: Run predict_rank_aware.py
+        id: predict-rank-aware
+        # Same never-blocks-the-pipeline discipline as the other
+        # predict_*.py steps above -- item 3 of the "explicitly
+        # disclosed, not built" gaps (the biggest and most novel), an
+        # informational-only artifact, not a replacement for predict.py's
+        # own squad, so a bug here must never cost a real deadline.
+        if: steps.gate.outputs.should_run == 'true'
+        run: |
+          set +e
+          python -m pipeline.predict_rank_aware
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::warning title=Rank-aware prediction failed::predict_rank_aware.py exited $code -- the core squad prediction above already succeeded and is unaffected. See the step log."
+          fi
+          exit 0
+
       - name: Open an issue for a missed deadline
         # Exit 3 leaves the run green -- a log annotation on a green run
         # is functionally silent, and this is the worst case the daily
@@ -202,7 +220,7 @@ jobs:
         id: commit-predict
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          git add data/predictions data/transfer_recommendations data/chip_observations data/field_simulation_predictions data/raw
+          git add data/predictions data/transfer_recommendations data/chip_observations data/field_simulation_predictions data/rank_aware_predictions data/raw
           if git diff --cached --quiet; then
             echo "No new prediction this run -- skipping commit."
           else

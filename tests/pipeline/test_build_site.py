@@ -30,6 +30,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(build_site, "REPO_ROOT", root)
     monkeypatch.setattr(build_site, "PREDICTIONS_DIR", root / "data" / "predictions")
     monkeypatch.setattr(build_site, "TRANSFER_RECOMMENDATIONS_DIR", root / "data" / "transfer_recommendations")
+    monkeypatch.setattr(build_site, "CHIP_OBSERVATIONS_DIR", root / "data" / "chip_observations")
     monkeypatch.setattr(build_site, "RESULTS_DIR", root / "data" / "results")
     monkeypatch.setattr(build_site, "CALIBRATION_PATH", root / "data" / "calibration.json")
     monkeypatch.setattr(build_site, "DOCS_ROOT", root / "docs")
@@ -285,6 +286,15 @@ def _transfer_recommendation(gw, status="PUBLISHED", transfers_in=None, transfer
     return body
 
 
+def _chip_observation(chip_name, gw, decision="PLAY_NOW", marginal_value=8.5, half=1):
+    return {
+        "schema_version": "1.0", "supersedes": None, "chip_name": chip_name, "gameweek": gw,
+        "marginal_value": marginal_value, "decision": decision,
+        "window": {"half": half, "start_event": 1, "stop_event": 19, "observation_phase_length": 7, "n_observed_including_this_gw": 8},
+        "generated_at_utc": "2026-08-19T12:00:00Z", "model_version": "abc", "record_id": f"{chip_name}-{gw}",
+    }
+
+
 def test_current_page_renders_a_published_transfer_recommendation(repo):
     (repo / "data").mkdir(exist_ok=True)
     (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
@@ -296,7 +306,7 @@ def test_current_page_renders_a_published_transfer_recommendation(repo):
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "Transfer recommendation" in current
+    assert "This week's recommended action" in current
     assert "New Guy" in current
     assert "Player One" in current
     assert "horizon=1" in current
@@ -313,7 +323,7 @@ def test_current_page_shows_nothing_when_transfer_recommendation_not_published(r
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "Transfer recommendation" not in current
+    assert "This week's recommended action" not in current
 
 
 def test_current_page_shows_nothing_when_no_transfer_ledger_exists_at_all(repo):
@@ -326,4 +336,48 @@ def test_current_page_shows_nothing_when_no_transfer_ledger_exists_at_all(repo):
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "Transfer recommendation" not in current
+    assert "This week's recommended action" not in current
+
+
+def test_current_page_shows_a_play_now_chip(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw03.jsonl", [_prediction(3)])
+    _write_ledger(repo / "data" / "chip_observations" / "bboost.jsonl", [_chip_observation("bboost", 3)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw3 prediction + chip play-now")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "This week's recommended action" in current
+    assert "Play this chip" in current
+    assert "Bench Boost" in current
+
+
+def test_current_page_stays_silent_for_non_play_now_chip_statuses(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _write_ledger(repo / "data" / "chip_observations" / "bboost.jsonl", [_chip_observation("bboost", 1, decision="OBSERVING")])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction, chip still observing")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "This week's recommended action" not in current
+    assert "Play this chip" not in current
+
+
+def test_current_page_reference_squad_section_is_present_and_labeled(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction only")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Reference: squad if building from scratch" in current

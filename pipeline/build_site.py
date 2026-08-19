@@ -58,6 +58,7 @@ from pipeline.site.htmlgen import Raw, esc, raw
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
 TRANSFER_RECOMMENDATIONS_DIR = REPO_ROOT / "data" / "transfer_recommendations"
+CHIP_OBSERVATIONS_DIR = REPO_ROOT / "data" / "chip_observations"
 RESULTS_DIR = REPO_ROOT / "data" / "results"
 CALIBRATION_PATH = REPO_ROOT / "data" / "calibration.json"
 DOCS_ROOT = REPO_ROOT / "docs"
@@ -113,6 +114,19 @@ def _all_transfer_recommendations() -> dict[int, list[dict]]:
     if not TRANSFER_RECOMMENDATIONS_DIR.exists():
         return {}
     return {int(p.stem[2:]): _read_ledger_lines(p) for p in sorted(TRANSFER_RECOMMENDATIONS_DIR.glob("gw*.jsonl"))}
+
+
+CHIP_DISPLAY_NAMES = {"bboost": "Bench Boost", "3xc": "Triple Captain", "freehit": "Free Hit"}
+
+
+def _all_chip_observations() -> dict[str, list[dict]]:
+    """One file PER CHIP (data/chip_observations/{chip_name}.jsonl), not
+    per gameweek -- see pipeline/predict_chips.py's own docstring for
+    why (this ledger's natural key is a time series within a chip's
+    window, not a single gameweek's decision)."""
+    if not CHIP_OBSERVATIONS_DIR.exists():
+        return {}
+    return {p.stem: _read_ledger_lines(p) for p in sorted(CHIP_OBSERVATIONS_DIR.glob("*.jsonl"))}
 
 
 def _url(path: str) -> str:
@@ -444,48 +458,83 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
     )
 
 
-def _transfer_recommendation_section(gw: int, transfer_recommendations: dict[int, list[dict]]) -> Raw:
-    """Phase 13 Block 2.5. Silent (empty string) unless a PUBLISHED
-    transfer recommendation exists for THIS gameweek -- every other
-    status (no settled gameweek yet, an inconsistency skip) is a real,
-    expected, low-stakes internal state this newer capability can be in
-    for most of the season so far, not something worth surfacing to a
-    visitor as if it were a gap in the core prediction record above it
-    on this same page."""
-    lines = transfer_recommendations.get(gw)
-    if not lines:
-        return raw("")
-    rec = lines[-1]
-    if rec["status"] != "PUBLISHED":
-        return raw("")
+def _play_now_chips_for_gw(gw: int, chip_observations: dict[str, list[dict]]) -> list[dict]:
+    """The only chip status worth surfacing on this page (Phase 13
+    Block 2.8 (a)) -- every other status (OBSERVING, WAIT, WINDOW_NOT_
+    OPEN, ALREADY_PLAYED_THIS_HALF, NO_VALUATION_AVAILABLE) is a real,
+    expected, low-stakes internal state for most of the season, not
+    something worth surfacing as if it were actionable."""
+    fired = []
+    for chip_name, records in chip_observations.items():
+        by_gw = {r["gameweek"]: r for r in records}  # last write per gw wins (append order)
+        rec = by_gw.get(gw)
+        if rec is not None and rec["decision"] == "PLAY_NOW":
+            fired.append(rec)
+    return fired
 
-    r = rec["recommendation"]
+
+def _this_weeks_action_section(gw: int, transfer_recommendations: dict[int, list[dict]], chip_observations: dict[str, list[dict]]) -> Raw:
+    """Phase 13 Block 2.8 (b) — ONE unified "what to do this week"
+    story, combining the transfer recommendation (Block 2.5) and any
+    chip that just cleared its 1/e stopping-rule threshold (Block 2.8
+    (a)), instead of two separately-computed signals competing for a
+    visitor's attention next to the full from-scratch squad below.
+    Silent (empty string) unless there's a PUBLISHED transfer
+    recommendation or a chip fired PLAY_NOW this gameweek -- see
+    _play_now_chips_for_gw's own docstring for why every other chip
+    status stays silent here."""
+    transfer_lines = transfer_recommendations.get(gw)
+    transfer_rec = transfer_lines[-1] if transfer_lines and transfer_lines[-1]["status"] == "PUBLISHED" else None
+    fired_chips = _play_now_chips_for_gw(gw, chip_observations)
+
+    if transfer_rec is None and not fired_chips:
+        return raw("")
 
     def _player_row(p: dict) -> str:
         return f"<li>{esc(p['name'])} ({esc(p['position'])}, {esc(p['team'])})</li>"
 
-    if not r["transfers_in"]:
-        move_html = "<p>No transfer recommended this gameweek.</p>"
-    else:
-        move_html = (
-            f'<div class="misses-grid"><div><h3>In</h3><ul>{"".join(_player_row(p) for p in r["transfers_in"])}</ul></div>'
-            f'<div><h3>Out</h3><ul>{"".join(_player_row(p) for p in r["transfers_out"])}</ul></div></div>'
-            f"<p>Free transfers available: {esc(r['free_transfers_available'])}. "
-            + (f"Hit taken: {esc(r['hit_points'])} points." if r["hit_points"] else "No hit taken.")
-            + "</p>"
+    parts = []
+    caveats: list[str] = []
+
+    if fired_chips:
+        chip_items = "".join(f"<li><strong>{esc(CHIP_DISPLAY_NAMES.get(c['chip_name'], c['chip_name']))}</strong></li>" for c in fired_chips)
+        parts.append(f"<h3>Play this chip</h3><ul>{chip_items}</ul>")
+        parts.append(
+            "<p class=\"section-note\">Timing decided by a real optimal-stopping rule (the classical 1/e "
+            "\"secretary problem\" rule) over this half-season's chip window, not a guess.</p>"
         )
 
-    caveats_html = "".join(f"<li>{esc(c)}</li>" for c in rec["caveats"])
+    if transfer_rec is not None:
+        r = transfer_rec["recommendation"]
+        if not r["transfers_in"]:
+            parts.append("<h3>Transfer</h3><p>No transfer recommended this gameweek.</p>")
+        else:
+            parts.append(
+                "<h3>Transfer</h3>"
+                f'<div class="misses-grid"><div><h4>In</h4><ul>{"".join(_player_row(p) for p in r["transfers_in"])}</ul></div>'
+                f'<div><h4>Out</h4><ul>{"".join(_player_row(p) for p in r["transfers_out"])}</ul></div></div>'
+                f"<p>Free transfers available: {esc(r['free_transfers_available'])}. "
+                + (f"Hit taken: {esc(r['hit_points'])} points." if r["hit_points"] else "No hit taken.")
+                + "</p>"
+            )
+        caveats.extend(transfer_rec["caveats"])
+    elif fired_chips:
+        parts.append("<h3>Transfer</h3><p>No transfer recommendation available yet this gameweek.</p>")
+
+    caveats_html = "".join(f"<li>{esc(c)}</li>" for c in caveats)
+    caveats_block = f"<p><strong>Scope, disclosed:</strong></p><ul>{caveats_html}</ul>" if caveats else ""
     return raw(
-        '<section class="notice notice-warning" aria-labelledby="transfer-heading">'
-        f'<h2 id="transfer-heading">Transfer recommendation (based on the real squad as of GW{esc(r["as_of_settled_gameweek"])})</h2>'
-        f"{move_html}"
-        f"<p><strong>Scope, disclosed:</strong></p><ul>{caveats_html}</ul>"
+        '<section class="notice notice-warning" aria-labelledby="action-heading">'
+        '<h2 id="action-heading">This week\'s recommended action</h2>'
+        f"{''.join(parts)}"
+        f"{caveats_block}"
         "</section>"
     )
 
 
-def build_current_page(calibration: dict, predictions: dict[int, list[dict]], transfer_recommendations: dict[int, list[dict]] | None = None) -> str:
+def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
+                        transfer_recommendations: dict[int, list[dict]] | None = None,
+                        chip_observations: dict[str, list[dict]] | None = None) -> str:
     record = _record_summary_fragment(calibration)
     caveat = _squad_recomputation_caveat()
     if not predictions:
@@ -508,15 +557,25 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]], tr
         )
         picks_html = raw(f"{_squad_table(squad)}{commit_note}")
 
-    transfer_section = _transfer_recommendation_section(gw, transfer_recommendations or {})
+    # Phase 13 Block 2.8 (b): ONE unified "what to do this week" story leads
+    # the page, right under the deadline -- the from-scratch squad below is
+    # explicitly demoted to reference material, not competing for attention
+    # as if it were itself a weekly instruction. See _this_weeks_action_
+    # section's own docstring for why it's silent when there's nothing
+    # actionable yet (the common case for most of the season so far).
+    action_section = _this_weeks_action_section(gw, transfer_recommendations or {}, chip_observations or {})
 
     body = raw(
         f"{record}"
         f"{caveat}"
         f"<h1>This week: GW{gw}</h1>"
         f'<p class="deadline-note">Deadline: {esc(prediction["deadline_time_utc"])} UTC</p>'
+        f"{action_section}"
+        '<h2>Reference: squad if building from scratch</h2>'
+        '<p class="section-note">Recomputed independently every week, with no memory of any prior squad — '
+        'not a transfer plan. If a recommended action is shown above, that is the actual thing to do this week, '
+        "not this squad.</p>"
         f"{picks_html}"
-        f"{transfer_section}"
     )
     return _page("This week", "This week's live FPL picks from APEX FPL.", "/current/", body, calibration["rebuilt_at_utc"])
 
@@ -758,7 +817,7 @@ main > section, .record-card, .notice { transition: box-shadow 0.2s ease; }
 .section-note { color: var(--muted); font-size: 0.9rem; margin-top: calc(var(--space-4) * -1 + var(--space-2)); margin-bottom: var(--space-4); }
 .misses-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-5); }
 @media (min-width: 640px) { .misses-grid { grid-template-columns: 1fr 1fr; } }
-.misses-grid h3 { color: var(--ink-2); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.misses-grid h3, .misses-grid h4 { color: var(--ink-2); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .misses-grid ul { margin: 0; padding-left: 1.1em; }
 .misses-grid li { margin-bottom: var(--space-2); }
 
@@ -811,10 +870,11 @@ def run() -> None:
     predictions = _all_predictions()
     results = _all_results()
     transfer_recommendations = _all_transfer_recommendations()
+    chip_observations = _all_chip_observations()
     rebuilt_at_utc = calibration["rebuilt_at_utc"]
 
     _write(DOCS_ROOT / "index.html", build_homepage(calibration, predictions, results))
-    _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions, transfer_recommendations))
+    _write(DOCS_ROOT / "current" / "index.html", build_current_page(calibration, predictions, transfer_recommendations, chip_observations))
     _write(DOCS_ROOT / "methodology" / "index.html", build_methodology_page(rebuilt_at_utc))
 
     missing = set(calibration["coverage"]["gameweeks_missing_prediction"] or [])

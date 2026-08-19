@@ -47,6 +47,52 @@ def test_1e_stopping_rule_finds_the_max_when_it_appears_after_the_observation_wi
     assert values[idx] == 9
 
 
+def test_should_play_chip_now_never_fires_during_observation_phase():
+    # window_size=10 -> r=round(10/e)=4, observation phase = first 4 candidates
+    values = [1, 2, 3, 1]
+    assert chips.should_play_chip_now(values, window_size=10) is False
+
+
+def test_should_play_chip_now_fires_when_a_later_value_beats_the_observed_threshold():
+    values = [1, 2, 3, 1, 1, 1, 1, 1, 1, 9]  # threshold=3 (max of first 4); 9 clearly beats it
+    for i in range(1, 9):
+        assert chips.should_play_chip_now(values[:i], window_size=10) is False
+    assert chips.should_play_chip_now(values, window_size=10) is True  # the 9 at the end
+
+
+def test_should_play_chip_now_forces_play_on_the_last_gameweek_of_the_window():
+    # every value stays below the observation-phase threshold -- must still force play at the end
+    values = [5, 4, 3, 2, 2, 2, 2, 2, 2, 2]
+    for i in range(1, 10):
+        forced = i == 10
+        assert chips.should_play_chip_now(values[:i], window_size=10) == forced
+
+
+def test_should_play_chip_now_raises_if_window_size_shorter_than_observed():
+    import pytest
+    with pytest.raises(ValueError, match="shorter than"):
+        chips.should_play_chip_now([1.0, 2.0, 3.0], window_size=2)
+
+
+def test_should_play_chip_now_matches_offline_rule_on_full_sequences():
+    """The core correctness property: evaluating the online rule
+    incrementally, week by week, through a full sequence must pick
+    EXACTLY the same gameweek the offline apply_1e_stopping_rule would
+    have chosen in hindsight over that same sequence -- not just a
+    similar-looking rule, the identical decision boundary."""
+    rng = np.random.default_rng(11)
+    for n in [1, 2, 5, 10, 19, 38]:
+        values = list(rng.uniform(0, 10, size=n))
+        offline_idx = chips.apply_1e_stopping_rule(values)
+
+        online_fired_at = None
+        for i in range(1, n + 1):
+            if chips.should_play_chip_now(values[:i], window_size=n):
+                online_fired_at = i - 1
+                break
+        assert online_fired_at == offline_idx, f"n={n}: offline picked {offline_idx}, online fired at {online_fired_at}"
+
+
 def test_1e_stopping_rule_beats_naive_first_choice_on_average_secretary_problem():
     """The textbook guarantee: applied to n candidates in a uniformly
     random order, the 1/e rule finds the TRUE maximum with probability

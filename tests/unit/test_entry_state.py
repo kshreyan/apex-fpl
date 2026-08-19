@@ -149,6 +149,46 @@ def test_build_current_squad_state_builds_from_real_picks_and_history(monkeypatc
     assert state.sell_price_by_id == {"101": 5.5, "102": 6.0, "103": 4.5}
 
 
+def _full_squad_picks_payload(captain_element=1):
+    """15 real-shaped picks: positions 1-11 starting XI, 12-15 bench,
+    in bench order."""
+    picks = [
+        {"element": i, "position": i, "multiplier": (2 if i == captain_element else 1) if i <= 11 else 0, "is_captain": i == captain_element, "is_vice_captain": i == captain_element + 1}
+        for i in range(1, 16)
+    ]
+    return {"picks": picks, "entry_history": {"bank": 0, "value": 1000, "event_transfers": 0, "event_transfers_cost": 0}}
+
+
+def test_parse_gameweek_lineup_extracts_squad_bench_and_captain():
+    payload = _full_squad_picks_payload(captain_element=3)
+    lineup = es.parse_gameweek_lineup(payload, gw=5)
+    assert lineup.gw == 5
+    assert len(lineup.squad_ids) == 15
+    assert lineup.bench_ids == ["12", "13", "14", "15"]
+    assert lineup.captain_id == "3"
+
+
+def test_parse_gameweek_lineup_bench_order_follows_position_field():
+    payload = _full_squad_picks_payload()
+    # scramble the list order but keep position values meaningful
+    import random
+    shuffled = dict(payload)
+    shuffled["picks"] = random.Random(3).sample(payload["picks"], len(payload["picks"]))
+    lineup = es.parse_gameweek_lineup(shuffled, gw=1)
+    assert lineup.bench_ids == ["12", "13", "14", "15"]
+
+
+def test_already_played_chips_returns_empty_list_when_absent(monkeypatch):
+    monkeypatch.setattr(es, "fetch_entry_history", lambda entry_id=es.ENTRY_ID: {"current": [], "past": []})
+    assert es.already_played_chips() == []
+
+
+def test_already_played_chips_returns_real_chips_field(monkeypatch):
+    chips = [{"name": "wildcard", "event": 5, "time": "2026-09-01T00:00:00Z"}]
+    monkeypatch.setattr(es, "fetch_entry_history", lambda entry_id=es.ENTRY_ID: {"current": [], "past": [], "chips": chips})
+    assert es.already_played_chips() == chips
+
+
 def test_build_current_squad_state_raises_on_inconsistent_api_state(monkeypatch):
     """entry_history claims gameweek 1 settled, but the picks endpoint
     still 404s -- a real inconsistency worth failing loudly over, not

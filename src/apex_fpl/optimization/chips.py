@@ -64,6 +64,41 @@ def value_wildcard(constrained_horizon_total_ep: float, unconstrained_horizon_to
     return float(unconstrained_horizon_total_ep - constrained_horizon_total_ep)
 
 
+def should_play_chip_now(values_so_far: list[float], window_size: int) -> bool:
+    """Online/live counterpart to `apply_1e_stopping_rule` (Phase 13
+    Block 2.8 (a)) — that function only ever answers "given the WHOLE
+    sequence in hindsight, which index would the rule have picked,"
+    useful for backtesting but not directly usable week-by-week in
+    production, where only the values observed SO FAR are known.
+    `values_so_far[-1]` is this gameweek's own value; `window_size` is
+    the total length of the decision window (e.g. 19 for a first-half
+    chip). Returns whether the rule says to play THIS gameweek.
+
+    Reproduces the exact same decision boundary as
+    `apply_1e_stopping_rule` when evaluated incrementally: during the
+    observation phase (the first round(window_size/e) candidates),
+    always returns False (still calibrating the threshold, matching the
+    offline rule never selecting an index inside that range). After the
+    observation phase, returns True iff this gameweek's value exceeds
+    the best value seen during observation, OR this is the LAST
+    gameweek of the window (forced use-it-or-lose-it, matching the
+    offline rule's own fallback to the last candidate) --
+    `test_apply_1e_stopping_rule_online_matches_offline_on_full_sequences`
+    verifies this equivalence directly, not just by construction."""
+    n = len(values_so_far)
+    if n == 0:
+        raise ValueError("no candidates")
+    if window_size < n:
+        raise ValueError(f"window_size ({window_size}) shorter than values_so_far ({n})")
+    r = max(1, round(window_size / math.e))
+    if n <= r:
+        return n == window_size  # window somehow already exhausted inside the observation phase (tiny window)
+    threshold = max(values_so_far[:r])
+    if values_so_far[-1] > threshold:
+        return True
+    return n == window_size
+
+
 def apply_1e_stopping_rule(values: list[float]) -> int:
     """Returns the 0-based index into `values` chosen by the classical
     1/e observe-then-commit stopping rule, processing values IN ORDER

@@ -77,6 +77,47 @@ class CurrentSquadState:
     as_of_gw: int  # the most recently settled gameweek this state reflects
 
 
+@dataclass(frozen=True)
+class GameweekLineup:
+    """A real entry's picks for ONE specific gameweek, as locked in --
+    distinct from CurrentSquadState, which reflects the most recently
+    SETTLED gameweek (used for transfer decisions, relative to a squad
+    that has already played). This reflects whatever gameweek's picks
+    were requested, including the CURRENT/upcoming one the moment its
+    deadline passes -- needed for a chip decision (Bench Boost/Triple
+    Captain value THIS gameweek's own bench/captain), which must be
+    knowable before that gameweek is played, not after."""
+    squad_ids: list[str]
+    bench_ids: list[str]  # picks positions 12-15, in bench order
+    captain_id: str
+    gw: int
+
+
+def parse_gameweek_lineup(payload: dict, gw: int) -> GameweekLineup:
+    picks = payload["picks"]
+    squad_ids = [str(p["element"]) for p in picks]
+    bench_ids = [str(p["element"]) for p in sorted(picks, key=lambda p: p["position"]) if p["position"] > 11]
+    captain_id = str(next(p["element"] for p in picks if p["is_captain"]))
+    return GameweekLineup(squad_ids=squad_ids, bench_ids=bench_ids, captain_id=captain_id, gw=gw)
+
+
+def already_played_chips(entry_id: int = ENTRY_ID) -> list[dict]:
+    """Real chips already played this season, from entry_history's own
+    `chips` field. Shape assumed from documented FPL API convention
+    (list of {"name": str, "event": int, ...}) -- NOT yet verified
+    against a real post-chip-play payload (no chip has been played on
+    this project's real entry as of this writing, pre-season). Returns
+    an empty list if the field is absent entirely (the expected
+    pre-season state, already confirmed live) rather than raising -- but
+    does NOT validate individual entries' shape; a caller reading
+    .get("name")/.get("event") from each dict will raise its own
+    KeyError/TypeError the first time a real chip is played if this
+    assumed shape turns out wrong, and that should propagate, not be
+    caught broadly."""
+    history = fetch_entry_history(entry_id)
+    return history.get("chips", [])
+
+
 def _get_with_retry(url: str) -> requests.Response | None:
     """Same backoff as apex_fpl.data.bronze.fetch_raw, but a 404 is
     returned (not retried, not raised) -- it is this API's own signal

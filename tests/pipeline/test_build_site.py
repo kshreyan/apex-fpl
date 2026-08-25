@@ -460,7 +460,7 @@ def test_current_page_renders_a_published_transfer_recommendation(repo):
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "This week's recommended action" in current
+    assert "This week's recommended transfer" in current
     assert "New Guy" in current
     assert "Player One" in current
     assert "horizon=1" in current
@@ -477,7 +477,7 @@ def test_current_page_shows_nothing_when_transfer_recommendation_not_published(r
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "This week's recommended action" not in current
+    assert "This week's recommended transfer" not in current
 
 
 def test_current_page_shows_nothing_when_no_transfer_ledger_exists_at_all(repo):
@@ -490,7 +490,7 @@ def test_current_page_shows_nothing_when_no_transfer_ledger_exists_at_all(repo):
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "This week's recommended action" not in current
+    assert "This week's recommended transfer" not in current
 
 
 def test_current_page_shows_a_play_now_chip(repo):
@@ -504,24 +504,64 @@ def test_current_page_shows_a_play_now_chip(repo):
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "This week's recommended action" in current
-    assert "Play this chip" in current
-    assert "Bench Boost" in current
+    assert "Chip this week?" in current
+    assert "Play Bench Boost" in current
 
 
-def test_current_page_stays_silent_for_non_play_now_chip_statuses(repo):
+def test_current_page_answers_no_chip_for_non_play_now_statuses(repo):
+    """The behavior this whole section exists to fix: a "no" is an
+    explicit, visible answer now, not silence indistinguishable from
+    "not computed yet.\""""
     (repo / "data").mkdir(exist_ok=True)
     (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
     _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
     _write_ledger(repo / "data" / "chip_observations" / "bboost.jsonl", [_chip_observation("bboost", 1, decision="OBSERVING")])
+    _write_ledger(repo / "data" / "chip_observations" / "wildcard.jsonl", [_chip_observation("wildcard", 1, decision="WINDOW_NOT_OPEN")])
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "gw1 prediction, chip still observing")
 
     build_site.run()
 
     current = (repo / "docs" / "current" / "index.html").read_text()
-    assert "This week's recommended action" not in current
-    assert "Play this chip" not in current
+    assert "Chip this week?" in current
+    assert "No chip this week" in current
+    assert "Bench Boost: still gathering data" in current
+    assert "Wildcard: not usable yet this half" in current
+
+
+def test_current_page_chip_section_shows_not_yet_computed_when_no_ledger_for_this_gw(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw01.jsonl", [_prediction(1)])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw1 prediction only, no chip ledger yet")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Chip this week?" in current
+    assert "Not yet computed for this gameweek" in current
+
+
+def test_current_page_chip_section_only_answers_for_the_current_gameweek(repo):
+    """A PLAY_NOW record from an EARLIER gameweek must never leak into
+    this week's answer -- only gw3's own record counts."""
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw03.jsonl", [_prediction(3)])
+    _write_ledger(repo / "data" / "chip_observations" / "bboost.jsonl", [
+        _chip_observation("bboost", 1, decision="PLAY_NOW"),
+        _chip_observation("bboost", 2, decision="ALREADY_PLAYED_THIS_HALF"),
+    ])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw3 prediction, stale chip history")
+
+    build_site.run()
+
+    current = (repo / "docs" / "current" / "index.html").read_text()
+    assert "Chip this week?" in current
+    assert "Not yet computed for this gameweek" in current
+    assert "Play Bench Boost" not in current
 
 
 def test_current_page_reference_squad_section_is_present_and_labeled(repo):

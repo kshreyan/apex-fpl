@@ -521,76 +521,109 @@ def build_homepage(calibration: dict, predictions: dict[int, list[dict]], result
     )
 
 
-def _play_now_chips_for_gw(gw: int, chip_observations: dict[str, list[dict]]) -> list[dict]:
-    """The only chip status worth surfacing on this page (Phase 13
-    Block 2.8 (a)) -- every other status (OBSERVING, WAIT, WINDOW_NOT_
-    OPEN, ALREADY_PLAYED_THIS_HALF, NO_VALUATION_AVAILABLE) is a real,
-    expected, low-stakes internal state for most of the season, not
-    something worth surfacing as if it were actionable."""
-    fired = []
-    for chip_name, records in chip_observations.items():
-        by_gw = {r["gameweek"]: r for r in records}  # last write per gw wins (append order)
-        rec = by_gw.get(gw)
-        if rec is not None and rec["decision"] == "PLAY_NOW":
-            fired.append(rec)
-    return fired
-
-
-def _this_weeks_action_section(gw: int, transfer_recommendations: dict[int, list[dict]], chip_observations: dict[str, list[dict]]) -> Raw:
-    """Phase 13 Block 2.8 (b) — ONE unified "what to do this week"
-    story, combining the transfer recommendation (Block 2.5) and any
-    chip that just cleared its 1/e stopping-rule threshold (Block 2.8
-    (a)), instead of two separately-computed signals competing for a
-    visitor's attention next to the full from-scratch squad below.
-    Silent (empty string) unless there's a PUBLISHED transfer
-    recommendation or a chip fired PLAY_NOW this gameweek -- see
-    _play_now_chips_for_gw's own docstring for why every other chip
-    status stays silent here."""
+def _this_weeks_action_section(gw: int, transfer_recommendations: dict[int, list[dict]]) -> Raw:
+    """Phase 13 Block 2.8 (b) — the transfer half of "what to do this
+    week." Chip timing has its own dedicated, always-visible section
+    (_chip_decision_section) since it must answer definitively even
+    when the answer is "no" — this section stays silent only when
+    there's no PUBLISHED transfer recommendation at all yet."""
     transfer_lines = transfer_recommendations.get(gw)
     transfer_rec = transfer_lines[-1] if transfer_lines and transfer_lines[-1]["status"] == "PUBLISHED" else None
-    fired_chips = _play_now_chips_for_gw(gw, chip_observations)
-
-    if transfer_rec is None and not fired_chips:
+    if transfer_rec is None:
         return raw("")
 
     def _player_row(p: dict) -> str:
         return f"<li>{esc(p['name'])} ({esc(p['position'])}, {esc(p['team'])})</li>"
 
-    parts = []
-    caveats: list[str] = []
+    r = transfer_rec["recommendation"]
+    if not r["transfers_in"]:
+        body = "<p>No transfer recommended this gameweek.</p>"
+    else:
+        body = (
+            f'<div class="misses-grid"><div><h4>In</h4><ul>{"".join(_player_row(p) for p in r["transfers_in"])}</ul></div>'
+            f'<div><h4>Out</h4><ul>{"".join(_player_row(p) for p in r["transfers_out"])}</ul></div></div>'
+            f"<p>Free transfers available: {esc(r['free_transfers_available'])}. "
+            + (f"Hit taken: {esc(r['hit_points'])} points." if r["hit_points"] else "No hit taken.")
+            + "</p>"
+        )
 
-    if fired_chips:
-        chip_items = "".join(f"<li><strong>{esc(CHIP_DISPLAY_NAMES.get(c['chip_name'], c['chip_name']))}</strong></li>" for c in fired_chips)
-        parts.append(f"<h3>Play this chip</h3><ul>{chip_items}</ul>")
-        parts.append(
+    caveats_html = "".join(f"<li>{esc(c)}</li>" for c in transfer_rec["caveats"])
+    caveats_block = f"<p><strong>Scope, disclosed:</strong></p><ul>{caveats_html}</ul>" if transfer_rec["caveats"] else ""
+    return raw(
+        '<section class="notice notice-warning" aria-labelledby="action-heading">'
+        '<h2 id="action-heading">This week\'s recommended transfer</h2>'
+        f"{body}"
+        f"{caveats_block}"
+        "</section>"
+    )
+
+
+_CHIP_ORDER = ["wildcard", "freehit", "bboost", "3xc"]
+
+_CHIP_NOT_PLAYING_REASONS = {
+    "WINDOW_NOT_OPEN": "not usable yet this half",
+    "ALREADY_PLAYED_THIS_HALF": "already played this half",
+    "NO_VALUATION_AVAILABLE": "no valuation available yet",
+    "OBSERVING": "still gathering data before it will recommend playing",
+    "WAIT": "value hasn't cleared the threshold yet",
+}
+
+
+def _chip_decision_for_gw(gw: int, chip_observations: dict[str, list[dict]]) -> dict[str, dict]:
+    """Each chip's latest record for EXACTLY this gameweek -- not the
+    chip's most recent record overall, which could be from an earlier
+    week if predict_chips.py hasn't run yet for `gw`."""
+    out = {}
+    for chip_name, records in chip_observations.items():
+        by_gw = {r["gameweek"]: r for r in records}  # last write per gw wins (append order)
+        rec = by_gw.get(gw)
+        if rec is not None:
+            out[chip_name] = rec
+    return out
+
+
+def _chip_decision_section(gw: int, chip_observations: dict[str, list[dict]]) -> Raw:
+    """Answers exactly one question, for the CURRENT gameweek only:
+    should a chip be played this week, and if so which. Always
+    rendered -- an explicit "no chip this week" is as much a real
+    answer as a "yes," and staying silent when the answer is "no" would
+    leave a visitor unable to tell "no chip recommended" apart from
+    "this hasn't been computed yet.\""""
+    records_by_chip = _chip_decision_for_gw(gw, chip_observations)
+    if not records_by_chip:
+        return raw(
+            '<section aria-labelledby="chip-heading">'
+            '<h2 id="chip-heading">Chip this week?</h2>'
+            "<p>Not yet computed for this gameweek.</p>"
+            "</section>"
+        )
+
+    ordered = [(name, records_by_chip[name]) for name in _CHIP_ORDER if name in records_by_chip]
+    ordered += [(name, rec) for name, rec in records_by_chip.items() if name not in _CHIP_ORDER]
+    fired = [name for name, rec in ordered if rec["decision"] == "PLAY_NOW"]
+
+    if fired:
+        names = ", ".join(CHIP_DISPLAY_NAMES.get(name, name) for name in fired)
+        answer = f'<p>{_status_badge(f"Play {names}", "good")}</p>'
+        note = (
             "<p class=\"section-note\">Timing decided by a real optimal-stopping rule (the classical 1/e "
             "\"secretary problem\" rule) over this half-season's chip window, not a guess.</p>"
         )
+    else:
+        answer = f'<p>{_status_badge("No chip this week", "muted")}</p>'
+        note = ""
 
-    if transfer_rec is not None:
-        r = transfer_rec["recommendation"]
-        if not r["transfers_in"]:
-            parts.append("<h3>Transfer</h3><p>No transfer recommended this gameweek.</p>")
-        else:
-            parts.append(
-                "<h3>Transfer</h3>"
-                f'<div class="misses-grid"><div><h4>In</h4><ul>{"".join(_player_row(p) for p in r["transfers_in"])}</ul></div>'
-                f'<div><h4>Out</h4><ul>{"".join(_player_row(p) for p in r["transfers_out"])}</ul></div></div>'
-                f"<p>Free transfers available: {esc(r['free_transfers_available'])}. "
-                + (f"Hit taken: {esc(r['hit_points'])} points." if r["hit_points"] else "No hit taken.")
-                + "</p>"
-            )
-        caveats.extend(transfer_rec["caveats"])
-    elif fired_chips:
-        parts.append("<h3>Transfer</h3><p>No transfer recommendation available yet this gameweek.</p>")
+    def _row(name: str, rec: dict) -> str:
+        label = CHIP_DISPLAY_NAMES.get(name, name)
+        detail = "play now" if rec["decision"] == "PLAY_NOW" else _CHIP_NOT_PLAYING_REASONS.get(rec["decision"], rec["decision"])
+        return f"<li>{esc(label)}: {esc(detail)}.</li>"
 
-    caveats_html = "".join(f"<li>{esc(c)}</li>" for c in caveats)
-    caveats_block = f"<p><strong>Scope, disclosed:</strong></p><ul>{caveats_html}</ul>" if caveats else ""
+    rows = "".join(_row(name, rec) for name, rec in ordered)
     return raw(
-        '<section class="notice notice-warning" aria-labelledby="action-heading">'
-        '<h2 id="action-heading">This week\'s recommended action</h2>'
-        f"{''.join(parts)}"
-        f"{caveats_block}"
+        '<section aria-labelledby="chip-heading">'
+        '<h2 id="chip-heading">Chip this week?</h2>'
+        f"{answer}{note}"
+        f"<ul>{rows}</ul>"
         "</section>"
     )
 
@@ -672,13 +705,14 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
         )
         picks_html = raw(f"{_squad_table(squad)}{commit_note}")
 
-    # Phase 13 Block 2.8 (b): ONE unified "what to do this week" story leads
-    # the page, right under the deadline -- the from-scratch squad below is
-    # explicitly demoted to reference material, not competing for attention
-    # as if it were itself a weekly instruction. See _this_weeks_action_
-    # section's own docstring for why it's silent when there's nothing
-    # actionable yet (the common case for most of the season so far).
-    action_section = _this_weeks_action_section(gw, transfer_recommendations or {}, chip_observations or {})
+    # Phase 13 Block 2.8 (b): "what to do this week" leads the page, right
+    # under the deadline -- the from-scratch squad below is explicitly
+    # demoted to reference material, not competing for attention as if it
+    # were itself a weekly instruction. The chip decision is always
+    # rendered (a "no" is a real answer, not silence); the transfer
+    # recommendation stays silent only when nothing's been published yet.
+    chip_section = _chip_decision_section(gw, chip_observations or {})
+    action_section = _this_weeks_action_section(gw, transfer_recommendations or {})
     rank_aware_section = _rank_aware_section(gw, rank_aware_predictions or {})
 
     body = raw(
@@ -686,6 +720,7 @@ def build_current_page(calibration: dict, predictions: dict[int, list[dict]],
         f"{caveat}"
         f"<h1>This week: GW{gw}</h1>"
         f'<p class="deadline-note">Deadline: {esc(prediction["deadline_time_utc"])} UTC</p>'
+        f"{chip_section}"
         f"{action_section}"
         '<h2>Reference: squad if building from scratch</h2>'
         '<p class="section-note">Recomputed independently every week, with no memory of any prior squad — '

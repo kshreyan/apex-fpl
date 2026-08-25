@@ -8,6 +8,7 @@ wiring and ledger discipline."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
@@ -41,7 +42,11 @@ def _install_tmp_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(pf, "_git_sha", lambda: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 
 
-NOW_EVENT_FUTURE = "2026-08-21T17:30:00Z"
+# Computed relative to the real wall clock, not a hardcoded literal --
+# a fixed calendar date eventually drifts into the past as real time
+# passes it, silently turning "PRE_DEADLINE" into "season has ended" for
+# every test below (this happened for real: see git history/incident).
+NOW_EVENT_FUTURE = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class _FakePlayerSimResult:
@@ -76,7 +81,6 @@ def test_season_ended_is_a_clean_noop(monkeypatch, tmp_path):
 
 def test_too_close_to_deadline_refuses_and_writes_nothing(monkeypatch, tmp_path):
     _install_tmp_dirs(monkeypatch, tmp_path)
-    from datetime import datetime, timedelta, timezone
     near_deadline = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     bs = make_bootstrap_static([make_event(1, near_deadline, is_next=True)])
     fixtures = [make_fixture(1, 1, team_h=1, team_a=2, kickoff_time=near_deadline)]

@@ -7,6 +7,7 @@ supersede chaining, dry-run, and propagate-on-failure).
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -57,7 +58,11 @@ def _fake_model_result(target_gw=1, captain_id="411"):
     }
 
 
-NOW_EVENT_FUTURE = "2026-08-21T17:30:00Z"  # far enough from "now" (real UTC at test time) to always be PRE_DEADLINE with room to spare
+# Computed relative to the real wall clock, not a hardcoded literal --
+# a fixed calendar date eventually drifts into the past as real time
+# passes it, silently turning "PRE_DEADLINE" into "season has ended" for
+# every test below (this happened for real: see git history/incident).
+NOW_EVENT_FUTURE = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def test_season_ended_is_a_clean_noop(monkeypatch, tmp_path):
@@ -74,7 +79,6 @@ def test_season_ended_is_a_clean_noop(monkeypatch, tmp_path):
 
 def test_too_close_to_deadline_refuses_and_writes_nothing(monkeypatch, tmp_path):
     _install_tmp_dirs(monkeypatch, tmp_path)
-    from datetime import datetime, timedelta, timezone
     near_deadline = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     bs = make_bootstrap_static([make_event(1, near_deadline, is_next=True)])
     fixtures = [make_fixture(1, 1, team_h=1, team_a=2, kickoff_time=near_deadline)]

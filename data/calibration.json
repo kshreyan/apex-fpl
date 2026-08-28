@@ -93,7 +93,8 @@
     "gameweeks_missing_prediction": [],
     "gameweeks_published": [
       1,
-      2
+      2,
+      3
     ],
     "gameweeks_scored": [
       1
@@ -257,11 +258,11 @@
     "log_loss": 0.9096,
     "n": 1
   },
-  "rebuilt_at_utc": "2026-08-28T06:20:19Z",
+  "rebuilt_at_utc": "2026-08-28T18:54:43Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "64643078b4a4ad8e2ec142a628e7ce0c043221df"
+  "source_commit": "d75f9e4a0c7cecd83b92306e61eb6b45433bb7d7"
 }

@@ -75,15 +75,30 @@ Two standing rules, decided before GW1, not after:
   the transfer recommendation (`pipeline/predict_transfers.py`).
   `pipeline/check_execution_divergence.py` now closes the other half:
   once a gameweek settles, it compares the real entry's actual picks
-  (squad as a set of 15 IDs + captain ID) against what `predict.py`
-  published for that same gameweek, checked exactly once per gameweek
-  and never re-checked (`data/execution_divergence/gw{n:02d}.jsonl`),
-  and `pipeline/build_site.py::build_gameweek_page` renders the result
-  — a quiet "Execution matched" note, or a permanent critical notice on
-  divergence. Wired into `pipeline.yml` as a best-effort step (same
-  never-blocks-the-pipeline discipline as `predict_transfers.py` and
-  `predict_chips.py`), alongside `score.py` since both act only on
-  already-settled gameweeks.
+  (squad as a set of 15 IDs + captain ID) against what the entry SHOULD
+  hold, checked exactly once per gameweek and never re-checked outside
+  the explicit `--correct` escape hatch (`data/execution_divergence/
+  gw{n:02d}.jsonl`), and `pipeline/build_site.py::build_gameweek_page`
+  renders the result — a quiet "Execution matched" note, or a permanent
+  critical notice on divergence. Wired into `pipeline.yml` as a
+  best-effort step (same never-blocks-the-pipeline discipline as
+  `predict_transfers.py` and `predict_chips.py`), alongside `score.py`
+  since both act only on already-settled gameweeks.
+  **Schema 1.1 correction (found auditing GW1/GW2 real results):** the
+  reference squad is NOT simply "what `predict.py` published" from GW2
+  onward. `predict.py` recomputes a squad from scratch every week,
+  unconstrained by the real entry's actual budget or prior squad value
+  — comparing a real, constrained squad against that unconstrained
+  ideal diverges almost every week regardless of whether the manual
+  transfer happened correctly, which defeats the whole point of this
+  check. The reference is now: for GW1, `predict.py`'s own squad
+  (there's no prior real squad to diff against); for GW2+, the real
+  entry's OWN prior-gameweek squad with `predict_transfers.py`'s
+  PUBLISHED recommendation for that gameweek applied. GW1 and GW2's
+  already-published records were corrected in place via
+  `--correct <gw> --reason schema_migration|comparison_methodology_bug`
+  — the append-only ledger keeps both the original (schema 1.0) and
+  corrected (schema 1.1) lines, never silently overwritten.
 
 ## Data taxonomy
 

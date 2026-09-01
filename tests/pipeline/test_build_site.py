@@ -190,13 +190,15 @@ def test_missing_prediction_gap_is_permanent_on_gameweek_page_and_homepage(repo)
     assert "pipeline gap" in home.lower() or "pipeline failure" in home.lower()
 
 
-def _divergence_record(gw, status="MATCHED", squad_diverged=False, captain_diverged=False):
+def _divergence_record(gw, status="MATCHED", squad_diverged=False, captain_diverged=False, comparison_basis="no_prior_squad_used_from_scratch_prediction"):
     return {
-        "schema_version": "1.0", "gameweek": gw, "entry_id": 123, "status": status,
+        "schema_version": "1.1", "gameweek": gw, "entry_id": 123, "status": status,
+        "comparison_basis": comparison_basis,
         "squad_diverged": squad_diverged, "captain_diverged": captain_diverged,
-        "real_squad_ids": ["1", "2", "3"], "predicted_squad_ids": ["1", "2", "3"],
+        "real_squad_ids": ["1", "2", "3"], "expected_squad_ids": ["1", "2", "3"],
         "real_captain_id": "2", "predicted_captain_id": "2",
-        "prediction_record_id": "p1", "checked_at_utc": "2026-08-22T09:00:00Z", "record_id": "d1",
+        "prediction_record_id": "p1", "transfer_recommendation_record_id": None,
+        "checked_at_utc": "2026-08-22T09:00:00Z", "record_id": "d1",
     }
 
 
@@ -276,6 +278,7 @@ def test_gameweek_page_shows_matched_execution(repo):
 
     gw_page = (repo / "docs" / "gameweek" / "gw01" / "index.html").read_text()
     assert "Execution matched" in gw_page
+    assert "from-scratch squad published for this gameweek" in gw_page
 
 
 def test_gameweek_page_shows_diverged_execution_as_a_permanent_critical_notice(repo):
@@ -292,6 +295,22 @@ def test_gameweek_page_shows_diverged_execution_as_a_permanent_critical_notice(r
     assert "Execution diverged" in gw_page
     assert "manual execution failure" in gw_page
     assert "the 15-man squad differs" in gw_page
+
+
+def test_gameweek_page_diverged_execution_names_the_transfer_recommendation_as_the_basis_for_gw2plus(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw02.jsonl", [_prediction(2)])
+    _write_ledger(repo / "data" / "execution_divergence" / "gw02.jsonl", [_divergence_record(2, status="DIVERGED", squad_diverged=True, comparison_basis="prior_squad_plus_recommended_transfer")])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw2 prediction + diverged execution vs recommended transfer")
+
+    build_site.run()
+
+    gw_page = (repo / "docs" / "gameweek" / "gw02" / "index.html").read_text()
+    assert "Execution diverged" in gw_page
+    assert "the recommended transfer applied to the entry" in gw_page
+    assert "prior squad" in gw_page
 
 
 def test_gameweek_page_stays_silent_when_not_yet_checked(repo):

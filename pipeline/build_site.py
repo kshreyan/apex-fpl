@@ -248,19 +248,30 @@ def _gw_status(gw: int, prediction: dict | None, result: dict | None, is_missing
     return result["status"], "muted"
 
 
+_DIVERGENCE_BASIS_LABEL = {
+    "prior_squad_plus_recommended_transfer": "the recommended transfer applied to the entry's prior squad",
+    "no_prior_squad_used_from_scratch_prediction": "the from-scratch squad published for this gameweek (no prior real squad exists yet)",
+}
+
+
 def _execution_divergence_section(divergence: dict | None) -> Raw:
     """CLAUDE.md's "real FPL entry: execution is human-in-the-loop"
     rule, second half -- a settled gameweek's real entry picks compared
-    against what was published, shown the same way a missing prediction
-    already is: as a permanent fact, not corrected or reconciled.
-    `divergence` is None when the gameweek hasn't been checked yet
-    (nothing to show, not a MATCHED result)."""
+    against what the entry SHOULD hold, shown the same way a missing
+    prediction already is: as a permanent fact, not corrected or
+    reconciled. `divergence` is None when the gameweek hasn't been
+    checked yet (nothing to show, not a MATCHED result).
+
+    The reference squad depends on `comparison_basis` (schema 1.1, see
+    pipeline/check_execution_divergence.py's own docstring for why this
+    isn't simply "what predict.py published" from GW2 onward)."""
     if divergence is None:
         return raw("")
+    basis = _DIVERGENCE_BASIS_LABEL.get(divergence.get("comparison_basis"), "what was published")
     if divergence["status"] == "MATCHED":
         return raw(
             f'<p class="commit-proof">{_status_badge("Execution matched", "good")} '
-            "The real FPL entry's actual picks for this gameweek matched what was published.</p>"
+            f"The real FPL entry's actual picks for this gameweek matched {esc(basis)}.</p>"
         )
     reasons = []
     if divergence["squad_diverged"]:
@@ -270,7 +281,7 @@ def _execution_divergence_section(divergence: dict | None) -> Raw:
     return raw(
         '<div class="notice notice-critical" role="note">'
         f'{_status_badge("Execution diverged", "critical")} '
-        "<div>The real FPL entry's actual picks for this gameweek diverged from what was published "
+        f"<div>The real FPL entry's actual picks for this gameweek diverged from {esc(basis)} "
         f"({esc(' and '.join(reasons))}) — a manual execution failure (the transfer or lineup wasn't "
         "entered in time, or was entered differently), not a model decision. This is a permanent "
         "record, not corrected or reconciled.</div></div>"

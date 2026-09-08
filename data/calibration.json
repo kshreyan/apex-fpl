@@ -24,6 +24,18 @@
           "player_id": "411",
           "threshold": 6
         }
+      },
+      {
+        "brier_contribution": 0.0364,
+        "call_id": "gw03-captain-haul",
+        "gameweek": 3,
+        "outcome": true,
+        "predicted_probability": 0.8091,
+        "subject": {
+          "kind": "captain",
+          "player_id": "411",
+          "threshold": 6
+        }
       }
     ],
     "points_forecast": [
@@ -88,8 +100,8 @@
     "hit_rate": null,
     "hit_rate_suppressed": true,
     "hits": 1,
-    "misses": 1,
-    "n": 2,
+    "misses": 2,
+    "n": 3,
     "per_gameweek": [
       {
         "gameweek": 1,
@@ -98,6 +110,10 @@
       {
         "gameweek": 2,
         "hit": true
+      },
+      {
+        "gameweek": 3,
+        "hit": false
       }
     ]
   },
@@ -112,7 +128,8 @@
     ],
     "gameweeks_scored": [
       1,
-      2
+      2,
+      3
     ],
     "total_gameweeks_season": 38
   },
@@ -125,28 +142,28 @@
   "points_forecast_metrics": {
     "by_call_kind": {
       "captain": {
-        "mae": 11.114,
-        "mean_error": 1.324,
-        "n": 2,
-        "rmse": 11.193
+        "mae": 8.351,
+        "mean_error": -0.059,
+        "n": 3,
+        "rmse": 9.283
       },
       "player": {
-        "mae": 3.265,
-        "mean_error": 1.614,
-        "n": 22,
-        "rmse": 4.04
+        "mae": 2.973,
+        "mean_error": 1.126,
+        "n": 33,
+        "rmse": 3.809
       },
       "squad_total": {
-        "mae": 18.417,
-        "mean_error": 18.417,
-        "n": 2,
-        "rmse": 20.368
+        "mae": 12.356,
+        "mean_error": 12.356,
+        "n": 3,
+        "rmse": 16.631
       }
     },
-    "mae": 5.034,
-    "mean_error": 2.884,
-    "n": 26,
-    "rmse": 7.44
+    "mae": 4.109,
+    "mean_error": 1.899,
+    "n": 39,
+    "rmse": 6.339
   },
   "points_vs_baselines": {
     "by_gameweek": [
@@ -163,18 +180,25 @@
         "model": 70,
         "template_team": 113,
         "top_10k": null
+      },
+      {
+        "average_manager": 51,
+        "gameweek": 3,
+        "model": 51,
+        "template_team": 48,
+        "top_10k": null
       }
     ],
-    "cumulative_average_manager_points": 131.0,
-    "cumulative_model_points": 123.0,
-    "cumulative_template_team_points": 169.0,
+    "cumulative_average_manager_points": 182.0,
+    "cumulative_model_points": 174.0,
+    "cumulative_template_team_points": 217.0,
     "cumulative_top_10k_points": null,
     "diff_vs_average_manager": -8.0,
-    "diff_vs_template_team": -46.0,
+    "diff_vs_template_team": -43.0,
     "diff_vs_top_10k": null
   },
   "probability_metrics": {
-    "brier_score": 0.2676,
+    "brier_score": 0.1905,
     "calibration_bins": [
       {
         "actual_rate": null,
@@ -262,7 +286,7 @@
           0.8,
           0.9
         ],
-        "n": 0,
+        "n": 1,
         "predicted_mean": null,
         "suppressed": true
       },
@@ -277,14 +301,14 @@
         "suppressed": true
       }
     ],
-    "log_loss": 0.7291,
-    "n": 2
+    "log_loss": 0.5567,
+    "n": 3
   },
-  "rebuilt_at_utc": "2026-09-07T12:51:28Z",
+  "rebuilt_at_utc": "2026-09-08T11:33:21Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "6af62b71a0f7bd634fc3a7dfa291f52ca6f84f3a"
+  "source_commit": "df324181872cf86cfe04bd4b85b35fdf2e2bdf11"
 }

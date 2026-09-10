@@ -82,8 +82,11 @@ def test_real_picks_not_yet_visible_is_skipped_not_a_false_match(monkeypatch, tm
     assert record is None
 
 
-def _picks_payload(elements, captain_element):
-    return {"picks": [{"element": e, "position": i + 1, "multiplier": 2 if e == captain_element else 1, "is_captain": e == captain_element, "is_vice_captain": False} for i, e in enumerate(elements)]}
+def _picks_payload(elements, captain_element, active_chip=None):
+    return {
+        "picks": [{"element": e, "position": i + 1, "multiplier": 2 if e == captain_element else 1, "is_captain": e == captain_element, "is_vice_captain": False} for i, e in enumerate(elements)],
+        "active_chip": active_chip,
+    }
 
 
 def test_matched_squad_and_captain(monkeypatch, tmp_path):
@@ -289,3 +292,69 @@ def test_invalid_correct_reason_raises(monkeypatch, tmp_path):
     _install_tmp_dirs(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="invalid correct_reason"):
         ced.check_gameweek(1, SETTLED_BOOTSTRAP, SETTLED_FIXTURES, NOW, correct_reason="not_a_real_reason")
+
+
+# --- Free Hit / Wildcard: a squad-changing chip played THIS gameweek is
+# not comparable against "prior squad + recommended transfer" -------------
+
+def test_target_gameweek_free_hit_is_not_comparable(monkeypatch, tmp_path):
+    _install_tmp_dirs(monkeypatch, tmp_path)
+    pred = _published_prediction(2, starters=["1", "2"], bench=["3"], captain_id="1")
+    _write_prediction(tmp_path / "predictions" / "gw02.jsonl", pred)
+    _write_transfer_recommendation(tmp_path / "transfer_recommendations" / "gw02.jsonl", 2, transfers_in=[], transfers_out=[])
+    _install_picks_by_gw(monkeypatch, {
+        1: _picks_payload([1, 2, 3], captain_element=1),
+        2: _picks_payload([50, 51, 52], captain_element=50, active_chip="freehit"),  # a radically different rental squad
+    })
+
+    record = ced.check_gameweek(2, SETTLED_BOOTSTRAP_GW2, SETTLED_FIXTURES_GW2, NOW)
+
+    assert record["status"] == "NOT_COMPARABLE"
+    assert record["comparison_basis"] == "chip_played_freehit"
+    assert record["squad_diverged"] is None
+    assert record["expected_squad_ids"] is None
+    assert record["real_squad_ids"] == ["50", "51", "52"]
+
+
+def test_target_gameweek_wildcard_is_not_comparable(monkeypatch, tmp_path):
+    _install_tmp_dirs(monkeypatch, tmp_path)
+    pred = _published_prediction(2, starters=["1", "2"], bench=["3"], captain_id="1")
+    _write_prediction(tmp_path / "predictions" / "gw02.jsonl", pred)
+    _write_transfer_recommendation(tmp_path / "transfer_recommendations" / "gw02.jsonl", 2, transfers_in=[], transfers_out=[])
+    _install_picks_by_gw(monkeypatch, {
+        1: _picks_payload([1, 2, 3], captain_element=1),
+        2: _picks_payload([50, 51, 52], captain_element=50, active_chip="wildcard"),
+    })
+
+    record = ced.check_gameweek(2, SETTLED_BOOTSTRAP_GW2, SETTLED_FIXTURES_GW2, NOW)
+
+    assert record["status"] == "NOT_COMPARABLE"
+    assert record["comparison_basis"] == "chip_played_wildcard"
+
+
+SETTLED_BOOTSTRAP_GW3 = make_bootstrap_static([
+    make_event(1, SETTLED_DEADLINE, finished=True, data_checked=True),
+    make_event(2, "2026-08-21T17:30:00Z", finished=True, data_checked=True),
+    make_event(3, "2026-08-28T17:30:00Z", finished=True, data_checked=True),
+])
+SETTLED_FIXTURES_GW3 = SETTLED_FIXTURES_GW2 + [make_fixture(3, 3, team_h=1, team_a=2, kickoff_time="2026-08-28T17:30:00Z", finished=True, team_h_score=1, team_a_score=0)]
+
+
+def test_prior_squad_resolves_through_a_free_hit_gameweek(monkeypatch, tmp_path):
+    """GW2 was Free Hit -- GW3's expected squad must be built from GW1's
+    real squad (the last real, persistent one), not GW2's rental."""
+    _install_tmp_dirs(monkeypatch, tmp_path)
+    pred = _published_prediction(3, starters=["1", "2"], bench=["3"], captain_id="1")
+    _write_prediction(tmp_path / "predictions" / "gw03.jsonl", pred)
+    _write_transfer_recommendation(tmp_path / "transfer_recommendations" / "gw03.jsonl", 3, transfers_in=["99"], transfers_out=["3"])
+    _install_picks_by_gw(monkeypatch, {
+        1: _picks_payload([1, 2, 3], captain_element=1),  # the real, persistent squad
+        2: _picks_payload([50, 51, 52], captain_element=50, active_chip="freehit"),  # one-week rental, reverts
+        3: _picks_payload([1, 2, 99], captain_element=1),  # real squad: GW1's squad with the recommended swap applied
+    })
+
+    record = ced.check_gameweek(3, SETTLED_BOOTSTRAP_GW3, SETTLED_FIXTURES_GW3, NOW)
+
+    assert record["status"] == "MATCHED"
+    assert record["comparison_basis"] == "prior_squad_plus_recommended_transfer"
+    assert sorted(record["expected_squad_ids"]) == ["1", "2", "99"]

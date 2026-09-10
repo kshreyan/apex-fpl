@@ -34,6 +34,18 @@ does (the recommender hasn't run yet, or found an inconsistent state),
 the check is skipped rather than guessed -- see check_gameweek's own
 docstring.
 
+**A target gameweek where Free Hit or Wildcard was played gets
+`status: "NOT_COMPARABLE"`, not DIVERGED.** Neither chip's real squad
+can be meaningfully checked against "prior squad + recommended
+transfer": predict_transfers.py's own horizon assumes ordinary 1-2-
+transfer weeks, and Free Hit's squad doesn't even persist to the next
+gameweek. Recorded plainly (not silently skipped forever) so it doesn't
+read as either a real match or a real failure. Separately, whenever the
+PRIOR gameweek was a Free Hit week, the prior-squad lookup resolves
+through `entry_state.resolve_persistent_squad_picks` -- Free Hit's
+squad reverts, so the real prior squad is whatever it was BEFORE the
+Free Hit gameweek, not the one-week rental itself.
+
 Captain comparison is unchanged (still against predict.py's own
 choice) -- a real, disclosed gap: no live artifact currently computes
 "best captain among the real held squad" the way predict_transfers.py
@@ -139,13 +151,45 @@ def check_gameweek(target_gw: int, bootstrap_static: dict, fixtures: dict, now: 
     lineup = es.parse_gameweek_lineup(real_picks, target_gw)
     real_squad_ids = sorted(lineup.squad_ids)
 
+    # Free Hit and Wildcard both replace most or all of the squad in a
+    # way no live recommendation models (predict_transfers.py's horizon
+    # assumes ordinary 1-2-transfer weeks; Free Hit's squad doesn't even
+    # persist to the next gameweek). Comparing either against "prior
+    # squad + recommended transfer" would be comparing against a
+    # reference that was never meant to represent a chip-played week --
+    # recorded plainly as NOT_COMPARABLE rather than a false DIVERGED.
+    played_chip = real_picks.get("active_chip")
+    if played_chip in ("freehit", "wildcard"):
+        body = {
+            "schema_version": SCHEMA_VERSION,
+            "supersedes": prior_record["record_id"] if prior_record else None,
+            "supersede_reason": correct_reason,
+            "gameweek": target_gw,
+            "entry_id": entry_id,
+            "status": "NOT_COMPARABLE",
+            "comparison_basis": f"chip_played_{played_chip}",
+            "squad_diverged": None,
+            "captain_diverged": None,
+            "real_squad_ids": real_squad_ids,
+            "expected_squad_ids": None,
+            "real_captain_id": lineup.captain_id,
+            "predicted_captain_id": prediction["squad"]["captain_player_id"],
+            "prediction_record_id": prediction["record_id"],
+            "transfer_recommendation_record_id": None,
+            "checked_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        record = {**body, "record_id": _content_hash(body)}
+        _append_ledger(ledger_path, record)
+        return record
+
     comparison_basis = None
     transfer_record_id = None
     expected_ids: set[str] = set()
     if target_gw > 1:
-        prior_picks = es.fetch_entry_picks(target_gw - 1, entry_id=entry_id)
-        if prior_picks is not None:
-            prior_lineup = es.parse_gameweek_lineup(prior_picks, target_gw - 1)
+        resolved_prior = es.resolve_persistent_squad_picks(target_gw - 1, entry_id=entry_id)
+        if resolved_prior is not None:
+            prior_picks, prior_gw = resolved_prior
+            prior_lineup = es.parse_gameweek_lineup(prior_picks, prior_gw)
             resolved = _expected_squad_from_prior_and_transfer(set(prior_lineup.squad_ids), target_gw)
             if resolved is not None:
                 expected_ids, transfer_record = resolved

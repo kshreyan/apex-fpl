@@ -157,6 +157,8 @@ def validate_entry_picks(payload: dict) -> None:
         raise EntryStateError(f"entry_picks: expected a dict at top level, got {type(payload).__name__}")
     if "picks" not in payload or not isinstance(payload["picks"], list):
         raise EntryStateError("entry_picks.picks: missing or not a list")
+    if "active_chip" not in payload:
+        raise EntryStateError("entry_picks.active_chip: missing -- needed to detect a Free Hit gameweek (see resolve_persistent_squad_picks)")
     for i, pick in enumerate(payload["picks"]):
         for field in ("element", "position", "multiplier", "is_captain", "is_vice_captain"):
             if field not in pick:
@@ -182,6 +184,36 @@ def fetch_entry_picks(gw: int, entry_id: int = ENTRY_ID) -> dict | None:
     validate_entry_picks(payload)
     _write_raw_capture(resp.content, "entry_picks", gw)
     return payload
+
+
+def resolve_persistent_squad_picks(as_of_gw: int, entry_id: int = ENTRY_ID) -> tuple[dict, int] | None:
+    """Free Hit rents a squad for exactly one gameweek and does not
+    persist -- the entry's REAL, ongoing squad the following week is
+    whatever it was before the Free Hit gameweek, unchanged. FPL's
+    picks payload flags this itself via `active_chip` (a real,
+    documented field: null, or the played chip's name, scoped to that
+    ONE gameweek specifically).
+
+    Any caller that needs the entry's real, persistent squad (as
+    opposed to "whatever picks were locked in for gameweek N
+    specifically") must go through this, not fetch_entry_picks
+    directly -- found auditing execution-divergence records after a
+    real Free Hit was played: build_current_squad_state and
+    check_execution_divergence.py's prior-squad lookup both read
+    picks[settled_gw] naively, which would silently mistake a Free Hit
+    gameweek's temporary rental squad for a real, persistent transfer.
+
+    Walks backward from `as_of_gw` past any consecutive Free Hit
+    gameweek(s) (at most one per half under the real rules, but this
+    doesn't assume that) to the most recent NON-Free-Hit picks. Returns
+    (picks_payload, actual_gw) for that gameweek, or None if
+    `as_of_gw`'s own picks aren't visible yet."""
+    picks = fetch_entry_picks(as_of_gw, entry_id=entry_id)
+    if picks is None:
+        return None
+    if picks.get("active_chip") == "freehit" and as_of_gw > 1:
+        return resolve_persistent_squad_picks(as_of_gw - 1, entry_id=entry_id)
+    return picks, as_of_gw
 
 
 def fetch_entry_history(entry_id: int = ENTRY_ID) -> dict:
@@ -245,16 +277,25 @@ def build_current_squad_state(now_cost_by_element: dict[int, int], entry_id: int
     `now_cost_by_element`: element_id (int, matching the picks payload's
     `element` field, NOT this project's usual player_id string) -> live
     now_cost (tenths of £m), used for the disclosed sell-price
-    approximation -- see module docstring."""
+    approximation -- see module docstring.
+
+    `as_of_gw` on the returned state is always the real, elapsed
+    settled gameweek (needed by callers' own `as_of_gw + 1 == target_gw`
+    sequencing checks) -- but the squad/bank/sell-price DATA is sourced
+    from resolve_persistent_squad_picks, which walks back past a Free
+    Hit gameweek to the real, persistent squad. If `settled_gw` itself
+    was a Free Hit week, this correctly returns what the entry held
+    BEFORE it, not the one-week rental."""
     history = fetch_entry_history(entry_id)
     settled_rows = history["current"]
     if not settled_rows:
         return None
     settled_gw = max(row["event"] for row in settled_rows)
 
-    picks_payload = fetch_entry_picks(settled_gw, entry_id)
-    if picks_payload is None:
+    resolved = resolve_persistent_squad_picks(settled_gw, entry_id)
+    if resolved is None:
         raise EntryStateError(f"entry_history reports gameweek {settled_gw} settled, but its picks are still unavailable -- inconsistent API state, investigate before trusting either")
+    picks_payload, _persistent_gw = resolved
 
     squad_ids = [str(p["element"]) for p in picks_payload["picks"]]
     free_transfers = compute_free_transfers(settled_rows, settled_gw)

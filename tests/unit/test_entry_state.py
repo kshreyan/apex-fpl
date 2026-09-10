@@ -21,10 +21,11 @@ class _FakeResponse:
             raise requests.exceptions.HTTPError(f"{self.status_code}")
 
 
-def _valid_picks_payload(elements=(1, 2, 3), bank=5, value=1000, event_transfers=0, event_transfers_cost=0):
+def _valid_picks_payload(elements=(1, 2, 3), bank=5, value=1000, event_transfers=0, event_transfers_cost=0, active_chip=None):
     return {
         "picks": [{"element": e, "position": i + 1, "multiplier": 1, "is_captain": i == 0, "is_vice_captain": i == 1} for i, e in enumerate(elements)],
         "entry_history": {"bank": bank, "value": value, "event_transfers": event_transfers, "event_transfers_cost": event_transfers_cost},
+        "active_chip": active_chip,
     }
 
 
@@ -55,6 +56,13 @@ def test_validate_entry_picks_raises_on_missing_entry_history_field():
     bad = _valid_picks_payload()
     del bad["entry_history"]["bank"]
     with pytest.raises(es.EntryStateError, match="entry_history.bank"):
+        es.validate_entry_picks(bad)
+
+
+def test_validate_entry_picks_raises_on_missing_active_chip_field():
+    bad = _valid_picks_payload()
+    del bad["active_chip"]
+    with pytest.raises(es.EntryStateError, match="active_chip"):
         es.validate_entry_picks(bad)
 
 
@@ -149,14 +157,14 @@ def test_build_current_squad_state_builds_from_real_picks_and_history(monkeypatc
     assert state.sell_price_by_id == {"101": 5.5, "102": 6.0, "103": 4.5}
 
 
-def _full_squad_picks_payload(captain_element=1):
+def _full_squad_picks_payload(captain_element=1, active_chip=None):
     """15 real-shaped picks: positions 1-11 starting XI, 12-15 bench,
     in bench order."""
     picks = [
         {"element": i, "position": i, "multiplier": (2 if i == captain_element else 1) if i <= 11 else 0, "is_captain": i == captain_element, "is_vice_captain": i == captain_element + 1}
         for i in range(1, 16)
     ]
-    return {"picks": picks, "entry_history": {"bank": 0, "value": 1000, "event_transfers": 0, "event_transfers_cost": 0}}
+    return {"picks": picks, "entry_history": {"bank": 0, "value": 1000, "event_transfers": 0, "event_transfers_cost": 0}, "active_chip": active_chip}
 
 
 def test_parse_gameweek_lineup_extracts_squad_bench_and_captain():
@@ -187,6 +195,84 @@ def test_already_played_chips_returns_real_chips_field(monkeypatch):
     chips = [{"name": "wildcard", "event": 5, "time": "2026-09-01T00:00:00Z"}]
     monkeypatch.setattr(es, "fetch_entry_history", lambda entry_id=es.ENTRY_ID: {"current": [], "past": [], "chips": chips})
     assert es.already_played_chips() == chips
+
+
+# --- resolve_persistent_squad_picks: Free Hit rents a squad for one
+# gameweek only and does not persist ---------------------------------------
+
+def test_resolve_persistent_squad_picks_returns_the_gameweek_itself_when_no_chip_played(monkeypatch, tmp_path):
+    monkeypatch.setattr(es, "RAW_DATA_ROOT", tmp_path)
+    payload = _valid_picks_payload(elements=(1, 2, 3), active_chip=None)
+    monkeypatch.setattr(es.requests, "get", lambda url, timeout, headers: _FakeResponse(200, payload))
+
+    result = es.resolve_persistent_squad_picks(4)
+
+    assert result == (payload, 4)
+
+
+def test_resolve_persistent_squad_picks_walks_back_past_a_free_hit_gameweek(monkeypatch, tmp_path):
+    monkeypatch.setattr(es, "RAW_DATA_ROOT", tmp_path)
+    gw4_freehit = _valid_picks_payload(elements=(101, 102, 103), active_chip="freehit")
+    gw3_real = _valid_picks_payload(elements=(1, 2, 3), active_chip=None)
+    payloads = {4: gw4_freehit, 3: gw3_real}
+
+    def fake_get(url, timeout, headers):
+        gw = next(g for g in payloads if f"event/{g}/picks" in url)
+        return _FakeResponse(200, payloads[gw])
+    monkeypatch.setattr(es.requests, "get", fake_get)
+
+    result = es.resolve_persistent_squad_picks(4)
+
+    assert result == (gw3_real, 3)
+
+
+def test_resolve_persistent_squad_picks_wildcard_does_not_get_skipped(monkeypatch, tmp_path):
+    """Unlike Free Hit, a Wildcard gameweek's squad IS the real,
+    persistent squad going forward -- it must not be walked past."""
+    monkeypatch.setattr(es, "RAW_DATA_ROOT", tmp_path)
+    payload = _valid_picks_payload(elements=(1, 2, 3), active_chip="wildcard")
+    monkeypatch.setattr(es.requests, "get", lambda url, timeout, headers: _FakeResponse(200, payload))
+
+    result = es.resolve_persistent_squad_picks(4)
+
+    assert result == (payload, 4)
+
+
+def test_resolve_persistent_squad_picks_returns_none_when_not_yet_visible(monkeypatch, tmp_path):
+    monkeypatch.setattr(es, "RAW_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(es.requests, "get", lambda url, timeout, headers: _FakeResponse(404))
+
+    assert es.resolve_persistent_squad_picks(4) is None
+
+
+def test_build_current_squad_state_uses_the_pre_free_hit_squad(monkeypatch, tmp_path):
+    """The real, live scenario this fix was built for: GW4 was Free
+    Hit, so the squad/bank going into GW5's transfer decision must come
+    from GW3, not GW4's one-week rental -- while as_of_gw stays 4 (the
+    real, elapsed settled gameweek) so predict_transfers.py's own
+    as_of_gw + 1 == target_gw sequencing check still lines up."""
+    monkeypatch.setattr(es, "RAW_DATA_ROOT", tmp_path)
+    history_payload = {"current": [
+        {"event": 2, "event_transfers": 0, "event_transfers_cost": 0, "bank": 5, "value": 1000},
+        {"event": 3, "event_transfers": 1, "event_transfers_cost": 0, "bank": 5, "value": 1000},
+        {"event": 4, "event_transfers": 0, "event_transfers_cost": 0, "bank": 20, "value": 1005},
+    ], "past": [], "chips": [{"name": "freehit", "event": 4}]}
+    gw4_freehit = _valid_picks_payload(elements=(201, 202, 203), bank=20, active_chip="freehit")
+    gw3_real = _valid_picks_payload(elements=(101, 102, 103), bank=7, active_chip=None)
+    payloads = {4: gw4_freehit, 3: gw3_real}
+
+    def fake_get(url, timeout, headers):
+        gw = next(g for g in payloads if f"event/{g}/picks" in url)
+        return _FakeResponse(200, payloads[gw])
+    monkeypatch.setattr(es, "fetch_entry_history", lambda entry_id=es.ENTRY_ID: history_payload)
+    monkeypatch.setattr(es.requests, "get", fake_get)
+
+    now_cost = {101: 55, 102: 60, 103: 45, 201: 90, 202: 90, 203: 90}
+    state = es.build_current_squad_state(now_cost)
+
+    assert state.squad_ids == ["101", "102", "103"]  # GW3's real squad, not GW4's Free Hit rental
+    assert state.bank == 0.7  # GW3's real bank, not GW4's Free Hit bank
+    assert state.as_of_gw == 4  # the real, elapsed settled gameweek -- unaffected
 
 
 def test_build_current_squad_state_raises_on_inconsistent_api_state(monkeypatch):

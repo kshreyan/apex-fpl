@@ -313,6 +313,26 @@ def test_gameweek_page_diverged_execution_names_the_transfer_recommendation_as_t
     assert "prior squad" in gw_page
 
 
+def test_gameweek_page_shows_not_comparable_for_a_free_hit_gameweek(repo):
+    (repo / "data").mkdir(exist_ok=True)
+    (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))
+    _write_ledger(repo / "data" / "predictions" / "gw04.jsonl", [_prediction(4)])
+    record = _divergence_record(4, status="NOT_COMPARABLE", comparison_basis="chip_played_freehit")
+    record["squad_diverged"] = None
+    record["captain_diverged"] = None
+    _write_ledger(repo / "data" / "execution_divergence" / "gw04.jsonl", [record])
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gw4 prediction + free hit not comparable")
+
+    build_site.run()
+
+    gw_page = (repo / "docs" / "gameweek" / "gw04" / "index.html").read_text()
+    assert "Not comparable" in gw_page
+    assert "Free Hit was played this gameweek" in gw_page
+    assert "Execution diverged" not in gw_page
+    assert "Execution matched" not in gw_page
+
+
 def test_gameweek_page_stays_silent_when_not_yet_checked(repo):
     (repo / "data").mkdir(exist_ok=True)
     (repo / "data" / "calibration.json").write_text(json.dumps(_minimal_calibration()))

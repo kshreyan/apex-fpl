@@ -267,6 +267,13 @@ def _execution_divergence_section(divergence: dict | None) -> Raw:
     isn't simply "what predict.py published" from GW2 onward)."""
     if divergence is None:
         return raw("")
+    if divergence["status"] == "NOT_COMPARABLE":
+        chip_label = {"chip_played_freehit": "Free Hit", "chip_played_wildcard": "Wildcard"}.get(divergence.get("comparison_basis"), "a squad-changing chip")
+        return raw(
+            f'<p class="commit-proof">{_status_badge("Not comparable", "muted")} '
+            f"{esc(chip_label)} was played this gameweek — no live recommendation models a chip-played squad, "
+            "so this check does not apply. Not a match, not a failure.</p>"
+        )
     basis = _DIVERGENCE_BASIS_LABEL.get(divergence.get("comparison_basis"), "what was published")
     if divergence["status"] == "MATCHED":
         return raw(

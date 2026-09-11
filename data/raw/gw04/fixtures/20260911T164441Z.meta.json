@@ -1,0 +1,13 @@
+{
+  "source": "fixtures",
+  "url": "https://fantasy.premierleague.com/api/fixtures/",
+  "retrieved_at": "2026-09-11T16:44:41+00:00",
+  "season": "2026/27",
+  "current_event_id": null,
+  "next_event_id": null,
+  "raw_payload_hash": "78a6eb9299b4c6b832d5dc3c37b8a106873c2af92508d37c3df8a6f0c4d31a45",
+  "schema_version": "1",
+  "license_status": "unauthenticated public read-only FPL API; no auth token or ToS acceptance required as of 2026-08-14. Re-verify periodically \u2014 this is not a substitute for reading the Premier League's actual terms.",
+  "http_status": 200,
+  "content_length": 186365
+}

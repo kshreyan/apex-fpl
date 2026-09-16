@@ -26,6 +26,18 @@
         }
       },
       {
+        "brier_contribution": 0.0526,
+        "call_id": "gw04-captain-haul",
+        "gameweek": 4,
+        "outcome": true,
+        "predicted_probability": 0.7707,
+        "subject": {
+          "kind": "captain",
+          "player_id": "411",
+          "threshold": 6
+        }
+      },
+      {
         "brier_contribution": 0.0364,
         "call_id": "gw03-captain-haul",
         "gameweek": 3,
@@ -45,6 +57,16 @@
         "error": 27.116,
         "gameweek": 2,
         "predicted": 42.884,
+        "subject": {
+          "kind": "squad_total"
+        }
+      },
+      {
+        "actual": 63,
+        "call_id": "gw04-squad-total",
+        "error": 14.313,
+        "gameweek": 4,
+        "predicted": 48.687,
         "subject": {
           "kind": "squad_total"
         }
@@ -80,18 +102,6 @@
         "subject": {
           "kind": "squad_total"
         }
-      },
-      {
-        "actual": 12,
-        "call_id": "gw02-player-229-points",
-        "error": 9.316,
-        "gameweek": 2,
-        "predicted": 2.684,
-        "subject": {
-          "fixture_count": 1,
-          "kind": "player",
-          "player_id": "229"
-        }
       }
     ]
   },
@@ -99,9 +109,9 @@
     "definition": "captain was the actual highest scorer among the selected starting XI that gameweek",
     "hit_rate": null,
     "hit_rate_suppressed": true,
-    "hits": 1,
+    "hits": 2,
     "misses": 2,
-    "n": 3,
+    "n": 4,
     "per_gameweek": [
       {
         "gameweek": 1,
@@ -114,6 +124,10 @@
       {
         "gameweek": 3,
         "hit": false
+      },
+      {
+        "gameweek": 4,
+        "hit": true
       }
     ]
   },
@@ -130,7 +144,8 @@
     "gameweeks_scored": [
       1,
       2,
-      3
+      3,
+      4
     ],
     "total_gameweeks_season": 38
   },
@@ -143,28 +158,28 @@
   "points_forecast_metrics": {
     "by_call_kind": {
       "captain": {
-        "mae": 8.351,
-        "mean_error": -0.059,
-        "n": 3,
-        "rmse": 9.283
+        "mae": 6.571,
+        "mean_error": -0.351,
+        "n": 4,
+        "rmse": 8.063
       },
       "player": {
-        "mae": 2.973,
-        "mean_error": 1.126,
-        "n": 33,
-        "rmse": 3.809
+        "mae": 2.967,
+        "mean_error": 1.184,
+        "n": 44,
+        "rmse": 3.725
       },
       "squad_total": {
-        "mae": 12.356,
-        "mean_error": 12.356,
-        "n": 3,
-        "rmse": 16.631
+        "mae": 12.845,
+        "mean_error": 12.845,
+        "n": 4,
+        "rmse": 16.083
       }
     },
-    "mae": 4.109,
-    "mean_error": 1.899,
-    "n": 39,
-    "rmse": 6.339
+    "mae": 4.004,
+    "mean_error": 1.963,
+    "n": 52,
+    "rmse": 6.053
   },
   "points_vs_baselines": {
     "by_gameweek": [
@@ -188,18 +203,25 @@
         "model": 51,
         "template_team": 48,
         "top_10k": null
+      },
+      {
+        "average_manager": 69,
+        "gameweek": 4,
+        "model": 63,
+        "template_team": 94,
+        "top_10k": null
       }
     ],
-    "cumulative_average_manager_points": 182.0,
-    "cumulative_model_points": 174.0,
-    "cumulative_template_team_points": 217.0,
+    "cumulative_average_manager_points": 251.0,
+    "cumulative_model_points": 237.0,
+    "cumulative_template_team_points": 311.0,
     "cumulative_top_10k_points": null,
-    "diff_vs_average_manager": -8.0,
-    "diff_vs_template_team": -43.0,
+    "diff_vs_average_manager": -14.0,
+    "diff_vs_template_team": -74.0,
     "diff_vs_top_10k": null
   },
   "probability_metrics": {
-    "brier_score": 0.1905,
+    "brier_score": 0.156,
     "calibration_bins": [
       {
         "actual_rate": null,
@@ -277,7 +299,7 @@
           0.7,
           0.8
         ],
-        "n": 0,
+        "n": 1,
         "predicted_mean": null,
         "suppressed": true
       },
@@ -302,14 +324,14 @@
         "suppressed": true
       }
     ],
-    "log_loss": 0.5567,
-    "n": 3
+    "log_loss": 0.4826,
+    "n": 4
   },
-  "rebuilt_at_utc": "2026-09-15T11:58:45Z",
+  "rebuilt_at_utc": "2026-09-16T11:54:03Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "697f5fca8622838cfefbf211b55e385bc806aacb"
+  "source_commit": "ea6d622e76ee42c52c9b35c78ec626531e28daad"
 }

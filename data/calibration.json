@@ -364,11 +364,11 @@
     "log_loss": 0.4167,
     "n": 6
   },
-  "rebuilt_at_utc": "2026-10-16T11:44:01Z",
+  "rebuilt_at_utc": "2026-10-16T11:55:34Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "16eae1431bf844248733f65660354c20a7239509"
+  "source_commit": "0c5c403e686ed2b14a66be830b0748e565a2f6a3"
 }

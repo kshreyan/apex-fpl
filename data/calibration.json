@@ -38,23 +38,23 @@
         }
       },
       {
+        "brier_contribution": 0.0992,
+        "call_id": "gw08-captain-haul",
+        "gameweek": 8,
+        "outcome": false,
+        "predicted_probability": 0.3149,
+        "subject": {
+          "kind": "captain",
+          "player_id": "427",
+          "threshold": 6
+        }
+      },
+      {
         "brier_contribution": 0.0695,
         "call_id": "gw06-captain-haul",
         "gameweek": 6,
         "outcome": true,
         "predicted_probability": 0.7363,
-        "subject": {
-          "kind": "captain",
-          "player_id": "411",
-          "threshold": 6
-        }
-      },
-      {
-        "brier_contribution": 0.0536,
-        "call_id": "gw05-captain-haul",
-        "gameweek": 5,
-        "outcome": true,
-        "predicted_probability": 0.7685,
         "subject": {
           "kind": "captain",
           "player_id": "411",
@@ -120,8 +120,8 @@
     "hit_rate": null,
     "hit_rate_suppressed": true,
     "hits": 3,
-    "misses": 4,
-    "n": 7,
+    "misses": 5,
+    "n": 8,
     "per_gameweek": [
       {
         "gameweek": 1,
@@ -150,6 +150,10 @@
       {
         "gameweek": 7,
         "hit": false
+      },
+      {
+        "gameweek": 8,
+        "hit": false
       }
     ]
   },
@@ -174,7 +178,8 @@
       4,
       5,
       6,
-      7
+      7,
+      8
     ],
     "total_gameweeks_season": 38
   },
@@ -187,28 +192,28 @@
   "points_forecast_metrics": {
     "by_call_kind": {
       "captain": {
-        "mae": 5.657,
-        "mean_error": -1.997,
-        "n": 7,
-        "rmse": 7.019
+        "mae": 5.5,
+        "mean_error": -2.297,
+        "n": 8,
+        "rmse": 6.747
       },
       "player": {
-        "mae": 2.941,
-        "mean_error": 1.046,
-        "n": 77,
-        "rmse": 3.812
+        "mae": 2.979,
+        "mean_error": 0.905,
+        "n": 88,
+        "rmse": 3.773
       },
       "squad_total": {
-        "mae": 14.09,
-        "mean_error": 10.506,
-        "n": 7,
-        "rmse": 16.209
+        "mae": 12.718,
+        "mean_error": 8.803,
+        "n": 8,
+        "rmse": 15.202
       }
     },
-    "mae": 4.008,
-    "mean_error": 1.539,
-    "n": 91,
-    "rmse": 6.025
+    "mae": 3.922,
+    "mean_error": 1.266,
+    "n": 104,
+    "rmse": 5.773
   },
   "points_vs_baselines": {
     "by_gameweek": [
@@ -260,18 +265,25 @@
         "model": 70,
         "template_team": 59,
         "top_10k": null
+      },
+      {
+        "average_manager": 45,
+        "gameweek": 8,
+        "model": 44,
+        "template_team": 26,
+        "top_10k": null
       }
     ],
-    "cumulative_average_manager_points": 416.0,
-    "cumulative_model_points": 401.0,
-    "cumulative_template_team_points": 503.0,
+    "cumulative_average_manager_points": 461.0,
+    "cumulative_model_points": 445.0,
+    "cumulative_template_team_points": 529.0,
     "cumulative_top_10k_points": null,
-    "diff_vs_average_manager": -15.0,
-    "diff_vs_template_team": -102.0,
+    "diff_vs_average_manager": -16.0,
+    "diff_vs_template_team": -84.0,
     "diff_vs_top_10k": null
   },
   "probability_metrics": {
-    "brier_score": 0.1235,
+    "brier_score": 0.1205,
     "calibration_bins": [
       {
         "actual_rate": null,
@@ -309,7 +321,7 @@
           0.3,
           0.4
         ],
-        "n": 1,
+        "n": 2,
         "predicted_mean": null,
         "suppressed": true
       },
@@ -374,14 +386,14 @@
         "suppressed": true
       }
     ],
-    "log_loss": 0.4171,
-    "n": 7
+    "log_loss": 0.4122,
+    "n": 8
   },
-  "rebuilt_at_utc": "2026-10-26T13:24:08Z",
+  "rebuilt_at_utc": "2026-10-27T12:32:05Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "f35020275a5221b0e074a5646efeca1d5cf4ae05"
+  "source_commit": "9a5a855d694d247700393319d4dabff98d993e77"
 }

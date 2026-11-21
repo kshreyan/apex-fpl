@@ -179,7 +179,8 @@
       8,
       9,
       10,
-      11
+      11,
+      12
     ],
     "gameweeks_scored": [
       1,
@@ -415,11 +416,11 @@
     "log_loss": 0.5118,
     "n": 10
   },
-  "rebuilt_at_utc": "2026-11-21T08:48:21Z",
+  "rebuilt_at_utc": "2026-11-21T14:53:27Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "c37d2e390feb62a002893e46afa988f923fe885f"
+  "source_commit": "05ad62a8fb559407a5fb7d69905fa4ec8f88903b"
 }

@@ -94,6 +94,16 @@
         }
       },
       {
+        "actual": 62,
+        "call_id": "gw11-squad-total",
+        "error": 15.36,
+        "gameweek": 11,
+        "predicted": 46.64,
+        "subject": {
+          "kind": "squad_total"
+        }
+      },
+      {
         "actual": 63,
         "call_id": "gw04-squad-total",
         "error": 14.313,
@@ -102,26 +112,16 @@
         "subject": {
           "kind": "squad_total"
         }
-      },
-      {
-        "actual": 61,
-        "call_id": "gw05-squad-total",
-        "error": 12.606,
-        "gameweek": 5,
-        "predicted": 48.394,
-        "subject": {
-          "kind": "squad_total"
-        }
       }
     ]
   },
   "captaincy": {
     "definition": "captain was the actual highest scorer among the selected starting XI that gameweek",
-    "hit_rate": 0.4,
+    "hit_rate": 0.3636,
     "hit_rate_suppressed": false,
     "hits": 4,
-    "misses": 6,
-    "n": 10,
+    "misses": 7,
+    "n": 11,
     "per_gameweek": [
       {
         "gameweek": 1,
@@ -162,6 +162,10 @@
       {
         "gameweek": 10,
         "hit": true
+      },
+      {
+        "gameweek": 11,
+        "hit": false
       }
     ]
   },
@@ -192,7 +196,8 @@
       7,
       8,
       9,
-      10
+      10,
+      11
     ],
     "total_gameweeks_season": 38
   },
@@ -205,28 +210,28 @@
   "points_forecast_metrics": {
     "by_call_kind": {
       "captain": {
-        "mae": 5.992,
-        "mean_error": -1.104,
-        "n": 10,
-        "rmse": 7.196
+        "mae": 5.493,
+        "mean_error": -1.049,
+        "n": 11,
+        "rmse": 6.863
       },
       "player": {
-        "mae": 2.953,
-        "mean_error": 0.928,
-        "n": 110,
-        "rmse": 3.665
+        "mae": 2.943,
+        "mean_error": 0.973,
+        "n": 121,
+        "rmse": 3.676
       },
       "squad_total": {
-        "mae": 12.79,
-        "mean_error": 9.658,
-        "n": 10,
-        "rmse": 15.103
+        "mae": 13.024,
+        "mean_error": 10.177,
+        "n": 11,
+        "rmse": 15.126
       }
     },
-    "mae": 3.943,
-    "mean_error": 1.443,
-    "n": 130,
-    "rmse": 5.735
+    "mae": 3.914,
+    "mean_error": 1.525,
+    "n": 143,
+    "rmse": 5.715
   },
   "points_vs_baselines": {
     "by_gameweek": [
@@ -299,18 +304,25 @@
         "model": 67,
         "template_team": 65,
         "top_10k": null
+      },
+      {
+        "average_manager": 35,
+        "gameweek": 11,
+        "model": 62,
+        "template_team": 28,
+        "top_10k": null
       }
     ],
-    "cumulative_average_manager_points": 563.0,
-    "cumulative_model_points": 563.0,
-    "cumulative_template_team_points": 643.0,
+    "cumulative_average_manager_points": 598.0,
+    "cumulative_model_points": 625.0,
+    "cumulative_template_team_points": 671.0,
     "cumulative_top_10k_points": null,
-    "diff_vs_average_manager": 0.0,
-    "diff_vs_template_team": -80.0,
+    "diff_vs_average_manager": 27.0,
+    "diff_vs_template_team": -46.0,
     "diff_vs_top_10k": null
   },
   "probability_metrics": {
-    "brier_score": 0.1656,
+    "brier_score": 0.1579,
     "calibration_bins": [
       {
         "actual_rate": null,
@@ -338,7 +350,7 @@
           0.2,
           0.3
         ],
-        "n": 1,
+        "n": 2,
         "predicted_mean": null,
         "suppressed": true
       },
@@ -413,14 +425,14 @@
         "suppressed": true
       }
     ],
-    "log_loss": 0.5118,
-    "n": 10
+    "log_loss": 0.4956,
+    "n": 11
   },
-  "rebuilt_at_utc": "2026-11-23T18:35:44Z",
+  "rebuilt_at_utc": "2026-11-24T18:02:03Z",
   "schema_version": "1.0",
   "small_sample_policy": {
     "behavior_below_min": "the raw count is always shown; any rate/percentage computed from fewer than min_n observations is reported as null (suppressed), not a misleadingly precise number",
     "min_n_for_rate_display": 10
   },
-  "source_commit": "9bba66f6aaf7a0f617b549e0edf86c25f029b101"
+  "source_commit": "71f20d19d2938b655bfc7799b882e0e335da95d6"
 }

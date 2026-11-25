@@ -1,0 +1,13 @@
+{
+  "source": "bootstrap_static",
+  "url": "https://fantasy.premierleague.com/api/bootstrap-static/",
+  "retrieved_at": "2026-11-25T17:32:16+00:00",
+  "season": "2026/27",
+  "current_event_id": 11,
+  "next_event_id": 12,
+  "raw_payload_hash": "0171b3dc87f13a64b4537721cf99bfbcd831c9b9f2103a90696ad5d282fe7519",
+  "schema_version": "1",
+  "license_status": "unauthenticated public read-only FPL API; no auth token or ToS acceptance required as of 2026-08-14. Re-verify periodically \u2014 this is not a substitute for reading the Premier League's actual terms.",
+  "http_status": 200,
+  "content_length": 1805200
+}
